@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>GSP Host Portal - Create Event</title>
+    <meta
+      name="description"
+      content="Host portal for Game Show Palooza event recaps."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://app.gspevents.com/assets/styles.css"
+    />
+
+    <!-- Global config first -->
+    <script src="https://app.gspevents.com/assets/config.js"></script>
+    <script src="https://app.gspevents.com/assets/main.js"></script>
+    <!-- Optional HEIC->JPEG (must be before hosts.js for best coverage) -->
+    <script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
+    <!-- Page logic -->
+    <script src="https://app.gspevents.com/assets/hosts.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-inner">
+        <img
+          src="https://app.gspevents.com/assets/gsp_logo.png"
+          class="logo"
+          alt="GSP Events"
+        />
+        <div class="header-right">Host Portal</div>
+      </div>
+    </header>
+
+    <main class="container page">
+      <section class="card">
+        <h1 class="h1">Create an Event</h1>
+        <p class="p subtitle">
+          Upload event details, PDF recap, and photos for social media.
+        </p>
+      </section>
+
+      <section class="grid grid-2 section">
+        <!-- Left: Event form -->
+        <div class="card">
+          <h2 class="h2">Event Details</h2>
+
+          <form id="eventForm">
+            <div class="form-group">
+              <label for="hostName">Host:</label>
+              <select id="hostName" name="hostName" class="input" required></select>
+            </div>
+
+            <div class="form-group">
+              <label for="venueName">Venue:</label>
+              <select id="venueName" name="venueName" class="input" required></select>
+            </div>
+
+            <div class="form-group">
+              <label for="eventDate">Event Date:</label>
+              <input type="date" id="eventDate" name="eventDate" class="input" required />
+            </div>
+            <div class="form-group">
+            <label for="showType">Event Type:</label>
+            <select id="showType" name="showType" class="input">
+              <option value="gsp">Game Show Palooza (GSP)</option>
+              <option value="musingo">Musingo</option>
+              <option value="private">Private Event</option>
+            </select>
+            <small class="small-text">Select the type of event.</small>
+          </div>
+
+            <div class="form-group">
+              <label for="pdfRecap">Upload PDF Recap (Max 1):</label>
+              <input
+                type="file"
+                id="pdfRecap"
+                name="pdfRecap"
+                accept=".pdf"
+                class="input"
+              />
+              <small class="small-text">Upload the official game recap PDF.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="photos">Upload Photos (Max 50):</label>
+              <input
+                type="file"
+                id="photos"
+                name="photos"
+                multiple
+                accept="image/*,.heic,.heif"
+                class="input"
+              />
+              <small class="small-text">
+                Drag and drop or click to select multiple photos.
+              </small>
+            </div>
+
+            <!-- Progress bar and file list -->
+            <div
+              class="progress-bar-container"
+              id="progressBarContainer"
+              style="display: none;"
+            >
+              <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+            </div>
+            <ul class="file-list" id="fileList" style="display: none;"></ul>
+
+            <div class="row row-2" style="margin-top: var(--space-4);">
+              <div class="form-group">
+                <label for="adjective">Vibe Adjective:</label>
+                <select id="adjective" class="input">
+                  <option value="">Random</option>
+                </select>
+                <small class="small-text">Pick the vibe, or leave Random.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="highlights">Special Shoutout:</label>
+                <textarea
+                  id="highlights"
+                  name="highlights"
+                  rows="4"
+                  class="input"
+                  placeholder="e.g., Happy Birthday [name]! New Team had a great time! Epic Comeback!"
+                ></textarea>
+                <small class="small-text">Write a sentence about something memorable.</small>
+              </div>
+            </div>
+
+            <div style="display:flex; gap: 12px; margin-top: var(--space-4);">
+              <button class="btn btn-primary" type="submit" id="submitButton">
+                Create Event
+                <div class="spinner" id="submitSpinner" style="display: none;"></div>
+              </button>
+              <button class="btn btn-ghost" type="button" id="resetButton">Reset Form</button>
+            </div>
+
+            <div class="progress-bar-container" id="segmentedBarContainer" style="display:none;">
+              <div class="segmented-progress" id="segmentedBar" aria-label="Upload progress"></div>
+            </div>
+            <div id="photoUploadStatus" class="status mt-2" style="display: none;"></div>
+          </form>
+        </div>
+
+        <!-- Right: Recent events (filtered) -->
+        <div class="card">
+          <h2 class="h2">My Recent Events</h2>
+          <ul id="recentEventsList" class="list"></ul>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

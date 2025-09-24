@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin • GSP Events</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" /> <!-- Absolute path -->
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css" />   <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/config.js"></script>    <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/main.js"></script>     <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/admin.js"></script>    <!-- Absolute path -->
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">Admin Portal</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card">
+    <h1 class="h1">Events</h1>
+    <div class="admin-controls">
+      <div>
+        <label>Search</label>
+        <input id="q" class="input" placeholder="Host or Venue" />
+      </div>
+      <div>
+        <label>Show Type</label>
+        <select id="showType" class="input">
+          <option value="">All</option>
+          <option value="gsp">GSP</option>
+          <option value="musingo">Musingo</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="status" class="input">
+          <option value="">All</option>
+          <option value="unposted">Unposted</option>
+          <option value="posted">Posted</option>
+        </select>
+      </div>
+      <div>
+        <label>Start</label>
+        <input id="start" type="date" class="input" />
+      </div>
+      <div>
+        <label>End</label>
+        <input id="end" type="date" class="input" />
+      </div>
+      <div class="kv-inline">
+        <button id="searchBtn" class="btn btn-primary">Search</button>
+        <button id="clearBtn" class="btn btn-ghost">Clear</button>
+      </div>
+    </div>
+
+    <div id="adminStatus" class="status" style="display:none;"></div>
+
+    <table class="admin-table" id="eventsTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Host</th>
+          <th>Venue</th>
+          <th>Show</th>
+          <th>Status</th>
+          <th>AI</th>
+          <th>Valid</th> <!-- New column header -->
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="eventsTbody">
+        <tr><td colspan="8">Use the filters then click Search.</td></tr> <!-- Updated colspan -->
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Bulk Validation not always needed 
+  <section class="card section">
+      <h2 class="h2">Validation Utilities</h2>
+      <div id="adminUtilitiesStatus" class="status mt-2" style="display:none;"></div>
+      <p class="p">Automatically validate events that meet specific criteria.</p>
+      <button id="batchValidateByCriteriaBtn" class="btn btn-primary">Batch Validate Events (PDF & >3 Photos)</button>
+  </section> -->
+
+</main>
+</body>
+</html>

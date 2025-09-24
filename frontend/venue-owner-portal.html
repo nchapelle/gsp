@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Venue Stats • GSP Events</title>
+  <meta name="description" content="Private portal for venue owners to view their event statistics." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <script src="/assets/config.js"></script>
+  <script src="/assets/main.js"></script> <!-- For GSP.status -->
+  <script src="/assets/venue-owner.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+      <div class="header-right">Venue Owner Portal</div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="card">
+      <h1 class="h1" id="venueNameTitle">Loading Venue Stats...</h1>
+      <p class="p" id="venueDetails"></p>
+      <div id="portalStatus" class="status mt-2" style="display: none;"></div>
+    </section>
+
+    <section class="card section">
+      <h2 class="h2">Event Statistics</h2>
+      <div id="eventsList" class="list">
+        <li class="item">Loading events...</li>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

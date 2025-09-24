@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>GSP Tournament Admin</title>
+  <meta name="description" content="Manage weekly tournament scores by venue." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
+  <script src="https://app.gspevents.com/assets/config.js"></script>
+  <script src="https://app.gspevents.com/assets/tournament-admin.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+      <div class="header-right">Tournament Admin</div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="card">
+      <h1 class="h1">Weekly Scores</h1>
+      <div id="taStatus" class="status" style="display:none;"></div>
+
+      <div class="row row-2">
+        <div class="form-group">
+          <label for="venueSelect">Select Venue</label>
+          <select id="venueSelect" class="input"></select>
+        </div>
+        <div class="form-group">
+          <label for="weekSelect">Week Ending (Sunday)</label>
+          <select id="weekSelect" class="input"></select>
+          <div class="help">Use “New Week” to add a new Sunday.</div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="newWeekBtn">New Week</button>
+        <button class="btn btn-ghost" id="loadBtn">Load Scores</button>
+      </div>
+    </section>
+
+    <section class="card section">
+      <h2 class="h2">Teams at Venue</h2>
+      <div id="teamsGrid" class="grid" style="grid-template-columns:1fr; gap:10px;">
+        <p class="p">Choose a venue and week, then click “Load Scores”.</p>
+      </div>
+
+      <div class="row row-2" style="margin-top:16px;">
+        <div class="form-group">
+          <label for="newTeamName">Add Team</label>
+          <input type="text" id="newTeamName" class="input" placeholder="Team Name" />
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button class="btn btn-ghost" id="addTeamBtn">Add</button>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:12px; margin-top:16px;">
+        <button class="btn btn-primary" id="saveBtn">Save Scores</button>
+      </div>
+    </section>
+
+    <p class="p mt-5"><a href="index.html" class="btn btn-ghost">← Back to Portal</a></p>
+  </main>
+</body>
+</html>

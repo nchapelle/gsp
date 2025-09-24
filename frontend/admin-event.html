@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Event • GSP Events</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/admin.css" />
+  <script src="/assets/config.js"></script>
+  <script src="/assets/main.js"></script> <!-- Ensure main.js for GSP.status and adminGate -->
+  <script src="/assets/admin.js"></script> <!-- Admin event specific logic -->
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">Admin Event</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card">
+    <h1 class="h1">Edit Event</h1>
+    <div id="evtStatus" class="status" style="display:none;"></div>
+
+    <div class="grid-3">
+      <div class="kv">
+        <label>Show Type</label>
+        <select id="showType" class="input">
+          <option value="gsp">GSP</option>
+          <option value="musingo">Musingo</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      <div class="kv">
+        <label>Date</label>
+        <input id="eventDate" type="date" class="input" />
+      </div>
+      <div class="kv">
+        <label>Status</label>
+        <select id="status" class="input">
+          <option value="unposted">Unposted</option>
+          <option value="posted">Posted</option>
+        </select>
+      </div>
+
+      <div class="kv">
+        <label>Host ID</label>
+        <input id="hostId" class="input" placeholder="Host ID (optional)" />
+      </div>
+      <div class="kv">
+        <label>Venue ID</label>
+        <input id="venueId" class="input" placeholder="Venue ID (optional)" /> <!-- Corrected: ID for Venue -->
+      </div>
+      <div class="kv">
+        <label>FB URL</label>
+        <input id="fbUrl" class="input" placeholder="https://www.facebook.com/events/..." />
+      </div>
+    </div>
+
+    <div class="kv" style="margin-top:12px;">
+      <label>Highlights</label>
+      <textarea id="highlights" class="input" rows="3" placeholder="Special shoutout"></textarea>
+    </div>
+
+    <div class="kv" style="margin-top:12px;">
+      <label>AI Recap</label>
+      <textarea id="aiRecap" class="input" rows="4" placeholder="Edit AI text as needed"></textarea>
+    </div>
+
+    <div class="kv" style="margin-top:12px;">
+      <label>PDF URL</label>
+      <input id="pdfUrl" class="input" placeholder="https://storage.googleapis.com/.../recap.pdf" />
+    </div>
+
+    <div class="row row-2" style="margin-top:12px;">
+        <div class="kv">
+            <label>Validation Status</label>
+            <span id="validationStatus" class="badge">N/A</span>
+        </div>
+        <div class="kv">
+            <label>Created At</label>
+            <span id="createdAt" class="badge">N/A</span>
+        </div>
+        <div class="kv">
+            <label>Updated At</label>
+            <span id="updatedAt" class="badge">N/A</span>
+        </div>
+    </div>
+
+    <div class="flex" style="margin-top:10px; gap:12px; flex-wrap:wrap;">
+      <button id="saveBtn" class="btn btn-primary">Save Event</button>
+      <button id="validateEventBtn" class="btn btn-ghost">Validate Event</button>
+      <button id="viewPdfOriginalBtn" class="btn btn-ghost">View PDF</button>
+      <button id="parseBtn" class="btn btn-ghost">Parse PDF</button>
+      <button id="importBtn" class="btn btn-ghost">Import Last Parsed</button>
+      <button id="migratePdfBtn" class="btn btn-ghost">Migrate PDF to GCS</button>
+      <a class="btn btn-ghost" href="/admin.html">← Back</a>
+    </div>
+
+    <hr class="sep" />
+
+    <h2 class="h2">Participation (Rankings)</h2>
+    <div class="small">Edit top rows for the night; add more rows as needed. Position must be unique.</div>
+    <div id="partsContainer"></div>
+    <div class="flex" style="margin-top:10px;">
+      <button id="addRowBtn" class="btn btn-ghost">Add Row</button>
+      <button id="savePartsBtn" class="btn btn-primary">Save Rankings</button>
+    </div>
+
+    <hr class="sep" />
+
+    <hr class="sep" />
+    <h2 class="h2">Tournament Score Entry</h2>
+    <div class="small">For each parsed team marked 'Tournament', link them to an official team and enter the points they earned for this event. Points will be assigned to the week of this event's date.</div>
+    <div id="tourneyScoreStatus" class="status" style="display:none;"></div>
+    <div id="tourneyScoresContainer">
+      <!-- JS will populate this section -->
+    </div>
+    <div class="flex" style="margin-top:10px;">
+      <button id="saveTourneyScoresBtn" class="btn btn-primary">Save Tournament Scores</button>
+    </div>
+
+    <h2 class="h2">Photos</h2>
+    <div id="photosList" class="media-grid"></div>
+    <div class="kv-inline" style="margin-top:10px;">
+      <input id="photoUrlInput" class="input" style="min-width:380px" placeholder="https://storage.googleapis.com/gsp-events-upload/uploads/....jpg" />
+      <button id="addPhotoUrlBtn" class="btn btn-primary">Add Photo by URL</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>

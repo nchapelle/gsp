@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin Data • GSP Events</title>
+  <meta name="description" content="Admin portal for managing GSP hosts, venues, and teams." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css" />
+
+  <!-- Load in sequence -->
+  <script src="https://app.gspevents.com/assets/config.js"></script>
+  <script src="https://app.gspevents.com/assets/main.js"></script>
+  <script src="https://app.gspevents.com/assets/admin-data.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+      <div class="header-right">Admin Data</div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="card">
+      <h1 class="h1" style="margin:0;">Admin Data</h1>
+      <div id="globalStatus" class="status" style="display:none;"></div>
+      <p class="p">Search and edit Hosts, Venues, and Tournament Teams. Use the forms to create or update entries.</p>
+    </section>
+
+    <!-- Hosts -->
+    <section class="card section">
+      <h2 class="h2">Hosts</h2>
+
+      <div class="row row-2">
+        <div class="form-group">
+          <label for="hostSearch">Search Hosts</label>
+          <input id="hostSearch" class="input" placeholder="Name or email…" />
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <button id="hostSearchBtn" class="btn btn-primary">Search</button>
+        </div>
+      </div>
+
+      <ul id="hostsList" class="list"></ul>
+
+      <hr class="sep" style="margin:18px 0; border-color: var(--border);" />
+
+      <h3 class="h2">Add / Edit Host</h3>
+      <form id="hostForm">
+        <input type="hidden" id="hostId" />
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="hostName">Name</label>
+            <input id="hostName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="hostEmail">Email</label>
+            <input id="hostEmail" class="input" type="email" />
+          </div>
+        </div>
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="hostPhone">Phone</label>
+            <input id="hostPhone" class="input" type="tel" />
+          </div>
+        </div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" id="hostSaveBtn">Save Host</button>
+          <button type="button" class="btn btn-ghost" id="clearHostFormBtn">Clear</button>
+        </div>
+        <div id="hostFormStatus" class="status mt-2" style="display:none;"></div>
+      </form>
+    </section>
+
+    <!-- Venues -->
+    <section class="card section">
+      <h2 class="h2">Venues</h2>
+
+      <div class="row row-2">
+        <div class="form-group">
+          <label for="venueSearch">Search Venues</label>
+          <input id="venueSearch" class="input" placeholder="Venue name…" />
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <button id="venueSearchBtn" class="btn btn-primary">Search</button>
+        </div>
+      </div>
+
+      <ul id="venuesList" class="list"></ul>
+
+      <hr class="sep" style="margin:18px 0; border-color: var(--border);" />
+
+      <h3 class="h2">Add / Edit Venue</h3>
+      <form id="venueForm">
+        <input type="hidden" id="venueId" />
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="venueName">Venue Name</label>
+            <input id="venueName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="defaultDay">Default Day</label>
+            <select id="defaultDay" class="input">
+              <option value="">—</option>
+              <option>Sunday</option><option>Monday</option><option>Tuesday</option>
+              <option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option>
+            </select>
+          </div>
+        </div>
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="defaultTime">Default Time</label>
+            <input id="defaultTime" class="input" placeholder="e.g., 7-9pm" />
+          </div>
+          <div class="form-group">
+            <label for="accessKey">Access Key</label>
+            <input id="accessKey" class="input" placeholder="(auto or regenerate)" />
+            <div class="help">Used for Venue Owner Portal links. Generate a new key to revoke old access.</div>
+          </div>
+        </div>
+
+        <!-- Owner link display + copy -->
+        <div class="form-group">
+          <label for="ownerLink">Owner Portal Link</label>
+          <input id="ownerLink" class="input" placeholder="Owner portal URL will appear here" readonly />
+          <div class="help">Share with the venue owner. Anyone with the link (key) can view validated stats.</div>
+          <div style="margin-top:8px;">
+            <button type="button" class="btn btn-ghost" id="copyOwnerLinkBtn">Copy Link</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" id="venueSaveBtn">Save Venue</button>
+          <button type="button" class="btn btn-ghost" id="clearVenueFormBtn">Clear</button>
+          <button type="button" class="btn btn-ghost" id="generateAccessKeyBtn">Generate New Key</button>
+        </div>
+        <div id="venueFormStatus" class="status mt-2" style="display:none;"></div>
+      </form>
+    </section>
+
+    <!-- Tournament Teams -->
+    <section class="card section">
+      <h2 class="h2">Tournament Teams</h2>
+
+      <div class="row row-2">
+        <div class="form-group">
+          <label for="teamSearch">Search Teams</label>
+          <input id="teamSearch" class="input" placeholder="Team name or captain email…" />
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <button id="teamSearchBtn" class="btn btn-primary">Search</button>
+        </div>
+      </div>
+
+      <ul id="teamsList" class="list"></ul>
+
+      <hr class="sep" style="margin:18px 0; border-color: var(--border);" />
+
+      <h3 class="h2">Add / Edit Team</h3>
+      <form id="teamForm">
+        <input type="hidden" id="teamId" />
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="teamName">Team Name</label>
+            <input id="teamName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="teamHomeVenue">Home Venue</label>
+            <select id="teamHomeVenue" class="input"></select>
+          </div>
+        </div>
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="captainName">Captain Name</label>
+            <input id="captainName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="captainEmail">Captain Email</label>
+            <input id="captainEmail" class="input" type="email" />
+          </div>
+        </div>
+        <div class="row row-2">
+          <div class="form-group">
+            <label for="captainPhone">Captain Phone</label>
+            <input id="captainPhone" class="input" type="tel" />
+          </div>
+          <div class="form-group">
+            <label for="playerCount">Player Count</label>
+            <input id="playerCount" class="input" type="number" />
+          </div>
+        </div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" id="teamSaveBtn">Save Team</button>
+          <button type="button" class="btn btn-ghost" id="clearTeamFormBtn">Clear</button>
+          <button type="button" class="btn btn-ghost" id="manageScoresBtn" style="display:none;">Manage Weekly Scores</button>
+        </div>
+        <div id="teamFormStatus" class="status mt-2" style="display:none;"></div>
+      </form>
+          <!-- Weekly Scores Modal (hidden by default) -->
+      <div id="scoresModal" class="modal-backdrop" style="display:none;">
+        <div class="modal-content card">
+          <div class="modal-header">
+            <h2 class="h2" id="scoresModalTitle">Manage Weekly Scores</h2>
+            <button id="closeScoresModalBtn" class="btn btn-ghost">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div id="scoresModalStatus" class="status" style="display:none;"></div>
+            <div class="form-group">
+              <label for="scoresVenueSelect">Scores at Venue</label>
+              <select id="scoresVenueSelect" class="input"></select>
+            </div>
+            <div id="weeklyScoresContainer">
+              <!-- JS will populate this with 12 weeks of inputs -->
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button id="saveScoresModalBtn" class="btn btn-primary">Save Changes</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bulk Upload -->
+    <section class="card section">
+      <h2 class="h2">Bulk Upload Historical Events (CSV)</h2>
+      <div class="small">Use to backfill a venue’s past nights. Required columns: Date, Host, # of people, # of teams, Comments</div>
+      <div id="bulkStatus" class="status" style="display:none;"></div>
+
+      <div class="row row-2" style="margin-top: 8px;">
+        <div class="form-group">
+          <label for="bulkVenue">Target Venue</label>
+          <select id="bulkVenue" class="input"></select>
+          <div class="help">All rows will be imported for this venue.</div>
+        </div>
+        <div class="form-group">
+          <label for="bulkFile">CSV File</label>
+          <input id="bulkFile" type="file" accept=".csv,text/csv" class="input" />
+          <div class="help">Drag a CSV with headers; comments may be quoted.</div>
+        </div>
+      </div>
+
+      <div class="row row-2" style="margin-top: 8px;">
+        <label class="kv-inline">
+          <input type="checkbox" id="bulkValidated" checked />
+          Mark events as validated
+        </label>
+        <label class="kv-inline">
+          <input type="checkbox" id="bulkPosted" checked />
+          Mark events as posted
+        </label>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top: 12px;">
+        <button id="bulkUploadBtn" class="btn btn-primary">Upload CSV</button>
+        <button id="bulkTemplateBtn" class="btn btn-ghost">Download Template</button>
+      </div>
+    </section>
+
+    <p class="p mt-5 text-center"><a href="/admin.html" class="btn btn-ghost">← Back to Admin</a></p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>GSP SMM Event</title>
+    <meta
+      name="description"
+      content="SMM event view: photos, PDF, AI recap, mark posted."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://app.gspevents.com/assets/styles.css"
+    />
+    <script src="https://app.gspevents.com/assets/config.js"></script>
+    <script src="https://app.gspevents.com/assets/main.js"></script>
+    <script src="https://app.gspevents.com/assets/smm-event.js"></script>  
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-inner">
+        <img
+          src="https://app.gspevents.com/assets/gsp_logo.png"
+          class="logo"
+          alt="GSP Events"
+        />
+        <div class="header-right">SMM Event</div>
+      </div>
+    </header>
+
+    <main class="container page">
+      <section class="card">
+        <h1 class="h1">Event</h1>
+        <div id="smmEventStatus" class="status" style="display: none;"></div>
+        <div id="smmEventDetails">
+          <p>Loading event…</p>
+        </div>
+      </section>
+
+      <section class="card section">
+        <h2 class="h2">Photos</h2>
+        <div id="smmPhotosContainer">
+          <p>Loading photos…</p>
+        </div>
+      </section>
+
+      <section class="card section">
+        <h2 class="h2">Social Media Text (AI)</h2>
+        <div class="form-group">
+          <label for="aiRecapInput">AI Recap</label>
+          <textarea
+            id="aiRecapInput"
+            class="input"
+            rows="4"
+            placeholder="AI recap will appear here once parsed and validated."
+            readonly <!-- SMM should not edit, only review -->
+          ></textarea>
+          <div class="help">Review AI-generated text. Changes are made in the Admin portal.</div>
+        </div>
+        <div style="display:flex; gap:12px;">
+          <!-- Changed from Save AI Recap to Load Newest AI Recap -->
+          <button class="btn btn-primary" id="loadNewestAiBtn">Load Newest AI Recap</button>
+        </div>
+      </section>
+
+      <section class="card section">
+        <h2 class="h2">Mark Posted</h2>
+        <div class="form-group">
+          <label for="fbUrlInput">Facebook Event URL</label>
+          <input
+            type="text"
+            id="fbUrlInput"
+            class="input"
+            placeholder="https://www.facebook.com/events/..."
+          />
+          <div class="help">Required to mark the event as posted.</div>
+        </div>
+        <div style="display:flex; gap:12px;">
+          <button class="btn btn-primary" id="markPostedBtn">Mark Posted</button>
+        </div>
+        <div id="smmActionStatus" class="status" style="display: none;"></div>
+      </section>
+
+      <p class="p mt-5">
+        <a href="/smm.html" class="btn btn-ghost">← Back to SMM Dashboard</a>
+      </p>
+    </main>
+  </body>
+</html>

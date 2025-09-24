@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://app.gspevents.com", "https://gspevents.web.app", "https://www.gspevents.com", "https://gspevents.squarespace.com"],
+    "method": ["PUT", "GET", "HEAD"],
+    "responseHeader": ["Content-Type", "x-goog-meta-*"],
+    "maxAgeSeconds": 3600
+  }
+]

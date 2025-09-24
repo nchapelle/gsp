@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tournament Scores • GSP Events</title>
+  <meta name="description" content="Weekly trivia standings and results by venue. Find your bar, see scores, and join next week." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <script src="/assets/config.js"></script>
+  <script src="/assets/tournament-public.js"></script>
+  <script src="/assets/main.js"></script>
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">Tournament Scores</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card">
+    <h1 class="h1">Tournament Scores</h1>
+    <div id="hubStatus" class="status" style="display:none;"></div>
+
+    <div class="row row-2" style="margin-top:8px;">
+      <div class="form-group">
+        <label for="venueSelect">Venue</label>
+        <select id="venueSelect" class="input"></select>
+      </div>
+      <div class="form-group">
+        <label for="weekSelect">Week Ending</label>
+        <select id="weekSelect" class="input"></select>
+        <div class="help">Pick the week to view scores for your venue.</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">
+      <button id="viewVenueBtn" class="btn btn-primary">View Venue</button>
+      <button id="viewWeekBtn" class="btn btn-ghost">View Venue Week</button>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2 class="h2">All Venues</h2>
+    <div id="venuesGrid" class="grid" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;">
+      <p class="p">Loading venues…</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

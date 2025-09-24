@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SMM Dashboard • GSP Events</title>
+<link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
+<script src="https://app.gspevents.com/assets/config.js"></script>
+<script src="https://app.gspevents.com/assets/main.js"></script>
+<script src="https://app.gspevents.com/assets/smm.js"></script>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">SMM Dashboard</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card" style="display:grid; gap:16px;">
+    <h1 class="h1" style="margin:0;">Unposted Events</h1>
+    <input id="searchInput" class="input" placeholder="Search by venue, host, or date…" />
+  </section>
+
+  <section class="section">
+    <div id="list" class="grid" style="grid-template-columns:1fr; gap:20px;"></div>
+  </section>
+</main>
+
+</body>
+</html>

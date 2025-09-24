@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Venue Results • GSP Events</title>
+  <meta name="description" content="Weekly trivia results for this venue — recent scores, schedule, and how to play next week." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <script src="/assets/config.js"></script>
+  <script src="/assets/tournament-public.js"></script>
+  <script src="/assets/main.js"></script>
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">Venue Scores</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card">
+    <h1 class="h1" id="venueTitle">Venue</h1>
+    <div id="venueStatus" class="status" style="display:none;"></div>
+
+    <div id="venueMeta" class="p"></div>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">
+      <a id="ctaNext" class="btn btn-primary" href="#">Add to Calendar</a>
+      <a id="ctaShare" class="btn btn-ghost" href="#" target="_blank">Share Venue</a>
+      <a class="btn btn-ghost" href="/tournament/scores">← Back to Scores</a>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2 class="h2">Recent Weeks</h2>
+    <div id="weeksList" class="list"></div>
+  </section>
+</main>
+</body>
+</html>

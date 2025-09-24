@@ -1,0 +1,13 @@
+Flask==3.0.0
+gunicorn==22.0.0
+flask_cors==4.0.0
+
+google-cloud-storage==2.10.0
+google-auth==2.33.0
+google-api-core==2.19.2
+requests==2.32.3
+
+pdfminer.six==20231228
+pypdf>=4.2.0
+cryptography>=42.0.0
+pg8000==1.31.2

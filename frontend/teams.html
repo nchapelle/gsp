@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tournament Teams • GSP Events</title>
+  <meta name="description" content="Manage tournament teams: names, captains, and home bars." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="config.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="gsp_logo.png" class="logo" alt="GSP Events" />
+      <div class="header-right">Tournament Teams</div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="grid grid-2">
+      <div class="card">
+        <h1 class="h2">Add / Edit Team</h1>
+
+        <div class="row row-2" style="margin-top: 8px;">
+          <div>
+            <label for="tName">Team Name</label>
+            <input id="tName" type="text" class="input" placeholder="e.g., The Know-It-Alls" />
+          </div>
+          <div>
+            <label for="tHomeVenue">Home Venue</label>
+            <select id="tHomeVenue" class="input"></select>
+            <div class="help">Optional, helps auto-link and standings.</div>
+          </div>
+        </div>
+
+        <div class="row row-2" style="margin-top: 8px;">
+          <div>
+            <label for="tCapName">Captain Name</label>
+            <input id="tCapName" type="text" class="input" placeholder="e.g., Melissa Creevey" />
+          </div>
+          <div>
+            <label for="tCapEmail">Captain Email</label>
+            <input id="tCapEmail" type="email" class="input" placeholder="e.g., melissa@example.com" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 8px;">
+          <div>
+            <label for="tCapPhone">Captain Phone</label>
+            <input id="tCapPhone" type="tel" class="input" placeholder="e.g., 215-817-8338" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px; margin-top:16px;">
+          <button class="btn btn-primary" id="saveTeam">Save Team</button>
+          <button class="btn btn-ghost" id="resetForm">Reset</button>
+        </div>
+
+        <div id="teamStatus" class="status" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="h2">All Teams</h2>
+        <ul id="teams" class="list"></ul>
+      </div>
+    </section>
+  </main>
+
+<script>
+async function j(u,o={}){ const r=await fetch(u,o); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+function showStatus(node, type, msg){ node.classList.remove('success','error'); node.style.display='block'; node.textContent=msg; if (type) node.classList.add(type); }
+
+let editId = null;
+
+async function loadVenues(){
+  const v = await j(`${CONFIG.API_BASE_URL}/venues`);
+  const sel = document.getElementById('tHomeVenue');
+  sel.innerHTML = `<option value="">Select Home Venue (optional)</option>` + v.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');
+}
+async function loadTeams(){
+  const t = await j(`${CONFIG.API_BASE_URL}/tournament-teams`);
+  const ul = document.getElementById('teams');
+  if (!t.length) { ul.innerHTML = `<li class="item">No teams yet.</li>`; return; }
+  ul.innerHTML = t.map(tt => `
+    <li class="item" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <strong style="color:var(--text-strong);">${tt.name}</strong>
+      ${tt.home_venue ? `<span class="badge">${tt.home_venue}</span>` : ''}
+      <span style="margin-left:auto; display:flex; gap:8px;">
+        <button class="btn btn-ghost" onclick="editTeam(${tt.id})">Edit</button>
+        <button class="btn btn-ghost" onclick="deleteTeam(${tt.id})">Delete</button>
+      </span>
+    </li>
+  `).join('');
+}
+function readForm(){
+  return {
+    name: document.getElementById('tName').value.trim(),
+    home_venue_id: parseInt(document.getElementById('tHomeVenue').value) || null,
+    captain_name: document.getElementById('tCapName').value.trim(),
+    captain_email: document.getElementById('tCapEmail').value.trim(),
+    captain_phone: document.getElementById('tCapPhone').value.trim()
+  };
+}
+function fillForm(t){
+  document.getElementById('tName').value = t.name || '';
+  document.getElementById('tHomeVenue').value = t.home_venue_id || '';
+  document.getElementById('tCapName').value = t.captain_name || '';
+  document.getElementById('tCapEmail').value = t.captain_email || '';
+  document.getElementById('tCapPhone').value = t.captain_phone || '';
+}
+
+document.getElementById('saveTeam').addEventListener('click', async ()=>{
+  const st = document.getElementById('teamStatus');
+  const body = readForm();
+  if (!body.name){ showStatus(st,'error','Team name is required.'); return; }
+  try {
+    if (editId){
+      await j(`${CONFIG.API_BASE_URL}/admin/tournament-teams/${editId}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+    } else {
+      await j(`${CONFIG.API_BASE_URL}/admin/tournament-teams`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+    }
+    showStatus(st,'success','Saved.');
+    editId = null;
+    loadTeams();
+  } catch (e) {
+    showStatus(st,'error','Error: ' + e.message);
+  }
+});
+
+document.getElementById('resetForm').addEventListener('click', ()=>{
+  editId = null;
+  fillForm({}); document.getElementById('teamStatus').style.display='none';
+});
+
+async function editTeam(id){
+  const list = await j(`${CONFIG.API_BASE_URL}/admin/tournament-teams`);
+  const t = list.find(x=>x.id===id);
+  if (!t) return;
+  editId = id; fillForm(t);
+}
+
+async function deleteTeam(id){
+  if (!confirm('Delete this team?')) return;
+  await j(`${CONFIG.API_BASE_URL}/admin/tournament-teams/${id}`, { method:'DELETE' });
+  if (editId === id){ editId = null; fillForm({}); }
+  loadTeams();
+}
+
+loadVenues().then(loadTeams);
+</script>
+</body>
+</html>

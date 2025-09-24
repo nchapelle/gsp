@@ -1,0 +1,44 @@
+steps:
+  # 1) Build
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-east1-docker.pkg.dev/gsp-app-project/gsp-backend-api/gsp-backend-api:latest
+      - .
+
+  # 2) Push
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-east1-docker.pkg.dev/gsp-app-project/gsp-backend-api/gsp-backend-api:latest
+
+  # 3) Deploy to Cloud Run using an env vars file
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -lc
+      - cat > env.list <<'EOF'
+      - >
+        printf "%s\n"
+        "PGHOST=ep-misty-base-adixqp50-pooler.c-2.us-east-1.aws.neon.tech"
+        "PGDATABASE=gsp_data"
+        "PGUSER=neondb_owner"
+        "PGPASSWORD=npg_AhPr5yjmITp1"
+        "PGSSLMODE=require"
+        "PGCHANNELBINDING=require"
+        "PGPORT=5432"
+        "GCS_BUCKET=gsp-events-upload"
+        "PUBLIC_BASE=https://app.gspevents.com"
+        "ALLOWED_ORIGINS=https://www.gspevents.com|https://gspevents.squarespace.com|https://app.gspevents.com|https://gspevents.web.app|https://gsp-app-project.web.app"
+        "REQUIRE_UPLOAD_TOKEN=false"        
+        > env.list
+        &&
+        gcloud run deploy gsp-backend-api
+        --image us-east1-docker.pkg.dev/gsp-app-project/gsp-backend-api/gsp-backend-api:latest
+        --region us-east1
+        --allow-unauthenticated
+        --env-vars-file=env.list
+
+images:
+  - us-east1-docker.pkg.dev/gsp-app-project/gsp-backend-api/gsp-backend-api:latest

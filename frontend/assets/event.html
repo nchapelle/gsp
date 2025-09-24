@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>GSP Event Details</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
+  <script src="https://app.gspevents.com/assets/config.js"></script>
+  <script>
+    // Simple script to extract event ID from URL and display it
+    document.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const eventId = urlParams.get('id');
+      const eventDetailsContainer = document.getElementById('event-details-content');
+      if (eventId) {
+        eventDetailsContainer.innerHTML = `<p>Loading details for Event ID: ${eventId}...</p>`;
+        // In a real app, you would fetch data from your backend here:
+        // fetch(`${CONFIG.API_BASE_URL}/events/${eventId}`)
+        //   .then(response => response.json())
+        //   .then(data => {
+        //     eventDetailsContainer.innerHTML = `<h2>Event ${data.id}</h2><p>Date: ${data.event_date}</p><p>Host: ${data.host}</p><p>Venue: ${data.venue}</p>`;
+        //   })
+        //   .catch(error => {
+        //     eventDetailsContainer.innerHTML = `<p class="status error">Failed to load event details for ID ${eventId}.</p>`;
+        //     console.error("Error loading event details:", error);
+        //   });
+      } else {
+        eventDetailsContainer.innerHTML = `<p class="status error">No Event ID specified.</p>`;
+      }
+    });
+  </script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+      <div class="header-right">Event Details</div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="card">
+      <h1 class="h1">Event Details</h1>
+      <div id="event-details-content">
+        <!-- Event details will load here -->
+      </div>
+      <p class="p mt-4"><a href="hosts.html">← Back to Host Portal</a></p>
+    </section>
+  </main>
+</body>
+</html>

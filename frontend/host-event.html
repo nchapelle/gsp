@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>GSP Host Portal • Event</title>
+    <meta
+      name="description"
+      content="Host event page: view details and upload additional photos."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://app.gspevents.com/assets/styles.css"
+    />
+
+    <!-- Config first -->
+    <script src="https://app.gspevents.com/assets/config.js"></script>
+    <!-- Optional: client-side HEIC->JPEG (load before host-event.js for best coverage) -->
+    <script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
+    <!-- Page script -->
+    <script src="https://app.gspevents.com/assets/host-event.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-inner">
+        <img
+          src="https://app.gspevents.com/assets/gsp_logo.png"
+          class="logo"
+          alt="GSP Events"
+        />
+        <div class="header-right">Host Event</div>
+      </div>
+    </header>
+
+    <main class="container page">
+      <!-- Event details -->
+      <section class="card">
+        <h1 class="h1">Event Details</h1>
+        <div id="event-details-content">
+          <p>Loading details…</p>
+        </div>
+      </section>
+
+      <!-- Photos preview + upload -->
+      <section class="card section">
+        <h2 class="h2">Photos</h2>
+        <div id="photosSection">
+          <div class="p" style="margin-bottom: var(--space-3);">
+            Upload more photos to this event.
+          </div>
+
+          <!-- Upload controls -->
+          <form id="addPhotosForm">
+            <div class="form-group">
+              <label for="addPhotosInput">Select Photos (Max 50):</label>
+              <input
+                type="file"
+                id="addPhotosInput"
+                multiple
+                accept="image/*,.heic,.heif"
+                class="input"
+              />
+              <small class="small-text">
+                Choose more photos to add to this event.
+              </small>
+            </div>
+
+            <!-- Per‑file status list -->
+            <ul class="file-list" id="fileList" style="display: none;"></ul>
+
+            <!-- Overall progress bar -->
+            <div class="progress-bar-container" id="segmentedBarContainer" style="display:none;">
+              <div class="segmented-progress" id="segmentedBar" aria-label="Upload progress"></div>
+            </div>
+            </div>
+
+            <div style="display:flex; gap: 12px; margin-top: var(--space-3);">
+              <button class="btn btn-primary" id="uploadPhotosButton" type="submit">
+                Upload Photos
+              </button>
+            </div>
+            <div id="photoUploadStatus" class="status mt-2" style="display: none;"></div>
+          </form>
+        </div>
+
+        <p class="p mt-4">
+          <a href="/hosts.html" class="btn btn-ghost">← Back to Host Portal</a>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,337 @@
+/* GSP Design System (mobile-first, brand-aligned) */
+:root {
+  /* Colors */
+  --bg: #0f1720; /* Dark navy background */
+  --panel: #111827; /* Slightly lighter dark panel */
+  --panel-2: #0c121a; /* Even darker for input backgrounds */
+  --border: #1f2937; /* Subtle border color */
+  --muted: #a2acb6; /* Lighter grey for hints/labels */
+  --text: #e8ecf1; /* Light text for readability */
+  --text-weak: #cfd6de; /* Weaker text for secondary info */
+  --text-strong: #ffffff; /* Pure white for highlights */
+
+  --yellow: #ffc000; /* Primary accent yellow */
+  --yellow-hover: #e0ac00; /* Darker yellow for hover */
+  --red: #e83f39; /* Red accent */
+  --blue: #39a0ed; /* Blue accent */
+  --teal: #00bfb1; /* Teal accent */
+
+  --ring: rgba(255, 192, 0, 0.35); /* Focus ring shadow */
+  --radius: 12px; /* Standard border radius */
+  --shadow-1: 0 10px 30px rgba(0, 0, 0, 0.35); /* Deeper shadow for cards */
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.25); /* Lighter shadow for buttons */
+
+  /* Spacing */
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 18px;
+  --space-5: 24px;
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5; /* Improved readability */
+}
+
+a {
+  color: var(--blue);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Header (Unified for both pages) */
+.header-bar, .header { /* Both headers get similar sticky behavior */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: linear-gradient(180deg, var(--panel-2) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner, .header-bar > div { /* Inner container for header content */
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.header-logo img, .logo {
+  height: 42px; /* Unified logo size */
+  max-width: 100%;
+}
+.header-right {
+  margin-left: auto;
+  color: var(--text-weak);
+  font-size: 14px;
+}
+
+/* Layout */
+.container { /* Base container for main content */
+  max-width: 1100px;
+  margin: 24px auto 80px; /* Default margin for larger screens */
+  padding: 0 var(--space-3); /* Default padding */
+}
+
+.section {
+  margin-top: var(--space-5);
+}
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+}
+/* Responsive grid columns */
+@media (min-width: 720px) {
+  .grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 960px) {
+  .grid-2 {
+    grid-template-columns: 1.15fr 1fr; /* Asymmetric split for host form + recent events */
+  }
+}
+
+/* Cards */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4);
+}
+
+/* Headings & Paragraphs */
+.h1, h1 { /* Unified h1 styling */
+  margin: 0 0 var(--space-2);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--text-strong);
+}
+.h2, h2 { /* Unified h2 styling */
+  margin: 0 0 var(--space-2);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.p, .subtitle { /* Unified paragraph styling */
+  margin: 0 0 var(--space-3);
+  color: var(--text-weak);
+  font-size: 15px; /* Slightly larger base font size */
+}
+
+/* Form Elements */
+label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.form-group { /* Specific styling for form groups on hosts.html */
+  margin-bottom: var(--space-4);
+}
+.input,
+textarea,
+select,
+input[type="date"],
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="file"] {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border); /* Changed to use var(--border) */
+  border-radius: 10px;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-size: 14px;
+}
+.input:focus,
+textarea:focus,
+select:focus,
+input[type="date"]:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="tel"]:focus,
+input[type="file"]:focus {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+.help, .small-text { /* Unified helper text styling */
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.row { /* Flex-like behavior for horizontal grouping */
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 680px) {
+  .row.row-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Buttons */
+.btn, button[type="submit"], button[type="button"] { /* Unified button base styles */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  border-radius: 10px;
+  border: 0;
+  cursor: pointer;
+  padding: 12px 16px;
+  transition: transform 0.05s ease, box-shadow 0.2s, background 0.2s, filter 0.2s;
+  will-change: transform;
+}
+.btn:active, button[type="submit"]:active, button[type="button"]:active {
+  transform: translateY(1px);
+}
+.btn-primary, button[type="submit"] { /* Primary button style */
+  background: var(--yellow);
+  color: #000;
+  box-shadow: var(--shadow-2);
+}
+.btn-primary:hover, button[type="submit"]:hover:not(:disabled) {
+  background: var(--yellow-hover);
+  filter: brightness(0.98);
+}
+.btn-ghost, button[type="button"] { /* Ghost button style */
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover, button[type="button"]:hover:not(:disabled) {
+  border-color: #2b3a4c;
+}
+button[type="submit"]:disabled, button[type="button"]:disabled {
+  background: #444; /* Darker disabled state */
+  color: #888;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+
+/* Lists (for Recent Events) */
+.list, .file-list { /* Unified list styling */
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  background: var(--panel-2); /* Slight contrast for list background */
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+.item, .file-list li {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex; /* Make list items flexible */
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-weak); /* Slightly weaker text for list items */
+  font-size: 14px;
+}
+.item:last-child, .file-list li:last-child {
+  border-bottom: 0;
+}
+
+/* Status Messages */
+.status, .upload-status { /* Unified status message styling */
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: 10px;
+  font-weight: 700;
+  display: none;
+  background: #0f1a24;
+  border: 1px solid #213244;
+  color: var(--text);
+}
+.status.success, .upload-status.success {
+  background: rgba(0, 191, 177, 0.12);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+.status.error, .upload-status.error {
+  background: rgba(232, 63, 57, 0.12);
+  border-color: var(--red);
+  color: #ff8884;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: #0f1a24;
+  flex-shrink: 0; /* Prevent shrinking in flex containers */
+}
+.badge.posted {
+  border-color: #1aa799;
+  color: var(--teal);
+  background: rgba(0, 191, 177, 0.12);
+}
+.badge.unposted {
+  border-color: #4e3a11;
+  color: #f6d37a;
+  background: rgba(255, 192, 0, 0.14);
+}
+
+/* Media grid (for images) */
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.media-grid img {
+  width: 100%;
+  border-radius: 8px;
+  display: block;
+}
+
+/* Status style for general information */
+.status.info {
+    background: rgba(57, 160, 237, 0.12); /* Blue */
+    border-color: var(--blue);
+    color: var(--blue);
+}
+
+/* Small utilities */
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-5 { margin-top: var(--space-5); }
+.text-center { text-align: center; }

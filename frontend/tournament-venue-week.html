@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weekly Results • GSP Events</title>
+  <meta name="description" content="This week’s trivia results at this venue — winners, scores, and photos." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <script src="/assets/config.js"></script>
+  <script src="/assets/tournament-public.js"></script>
+  <script src="/assets/main.js"></script>
+</head>
+<body>
+<header class="header">
+  <div class="header-inner">
+    <img src="/assets/gsp_logo.png" class="logo" alt="GSP Events" />
+    <div class="header-right">Weekly Results</div>
+  </div>
+</header>
+
+<main class="container page">
+  <section class="card">
+    <h1 class="h1" id="weekTitle">Weekly Results</h1>
+    <div id="weekStatus" class="status" style="display:none;"></div>
+    <div class="p" id="weekMeta"></div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">
+      <a id="ctaVenue" class="btn btn-ghost" href="#">← Back to Venue</a>
+      <a id="ctaShareWeek" class="btn btn-ghost" href="#" target="_blank">Share Week</a>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2 class="h2">Standings</h2>
+    <div id="scoresTableWrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th style="width:80px;">Place</th>
+            <th>Team</th>
+            <th style="width:120px;">Points</th>
+            <th style="width:140px;">Players</th>
+          </tr>
+        </thead>
+        <tbody id="scoresTbody">
+          <tr><td colspan="4">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2 class="h2">Photos</h2>
+    <div id="photosGrid" class="media-grid"></div>
+    <div class="help">Photos appear when linked to the weekly event recap.</div>
+  </section>
+</main>
+</body>
+</html>
