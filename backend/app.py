@@ -1352,6 +1352,26 @@ def migrate():
             );
         """)
 
+        cur.execute("""
+            DO $$
+            BEGIN
+              -- First, drop the old constraint if it exists
+              IF EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uniq_venue_date'
+              ) THEN
+                ALTER TABLE events DROP CONSTRAINT uniq_venue_date;
+              END IF;
+
+              -- Now, add the new, more specific three-column constraint
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uniq_event_by_venue_date_type'
+              ) THEN
+                ALTER TABLE events
+                  ADD CONSTRAINT uniq_event_by_venue_date_type UNIQUE (venue_id, event_date, show_type);
+              END IF;
+            END$$;
+        """)
+
         # --- Indexes for Performance ---
         cur.execute("CREATE INDEX IF NOT EXISTS idx_event_photos_event ON event_photos(event_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_event_participation_event_pos ON event_participation(event_id, position);")
@@ -1413,6 +1433,50 @@ def get_venues():
         ])
     finally:
         conn.close()
+
+@app.get("/venues/<int:vid>/recent-photos")
+def get_venue_recent_photos(vid):
+    """
+    Finds the most recent event for a given venue that has photos
+    and returns the event_id and the list of photo URLs.
+    """
+    conn = getconn()
+    try:
+        cur = conn.cursor()
+        # Find the most recent event_id for this venue that has at least one photo.
+        cur.execute("""
+            SELECT e.id
+            FROM events e
+            WHERE e.venue_id = %s
+              AND EXISTS (SELECT 1 FROM event_photos ep WHERE ep.event_id = e.id)
+            ORDER BY e.event_date DESC
+            LIMIT 1;
+        """, (vid,))
+        
+        result = cur.fetchone()
+        if not result:
+            conn.close()
+            return jsonify({"message": "No recent events with photos found for this venue."}), 404
+
+        most_recent_event_id = result[0]
+
+        # Now get all photos for that event
+        cur.execute("SELECT photo_url FROM event_photos WHERE event_id=%s ORDER BY id;", (most_recent_event_id,))
+        photos = [r[0] for r in cur.fetchall()]
+
+        conn.close()
+        return jsonify({
+            "eventId": most_recent_event_id,
+            "photoUrls": photos
+        })
+    except Exception as e:
+        logger.exception("get_venue_recent_photos failed")
+        try: 
+            if 'conn' in locals() and conn: 
+                conn.close()
+        except Exception: 
+            pass
+        return jsonify({"error": str(e)}), 500
 
 # ------------------------------------------------------------------------------
 # Create Event
@@ -2128,32 +2192,36 @@ def get_event_photos_list(eid):
 @app.get("/events/<int:eid>/download-photos")
 def download_event_photos_zip(eid):
     conn = getconn()
-    zip_buffer = BytesIO()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT photo_url FROM event_photos WHERE event_id=%s ORDER BY id;", (eid,))
-        all_photo_urls = [r[0] for r in cur.fetchall()]
+        cur.execute("""
+            SELECT e.event_date, v.name
+            FROM events e
+            JOIN venues v ON e.venue_id = v.id
+            WHERE e.id = %s;
+        """, (eid,))
+        event_info = cur.fetchone()
         
-        if not all_photo_urls:
-            response = jsonify({"message": "No photos found for this event."})
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            return response, 200
+        if not event_info:
+            conn.close()
+            return jsonify({"error": "Event not found"}), 404
 
-        # --- BATCHING LOGIC ---
-        photo_urls_to_zip = all_photo_urls
-        batch_num_str = request.args.get("batch")
-        batch_size = 12
-        download_suffix = ""
+        event_date_str = event_info[0].isoformat() if event_info[0] else "UnknownDate"
+        venue_name_str = (event_info[1] or "UnknownVenue").replace(" ", "-")
+        safe_venue_name = re.sub(r'[^\w\-]', '', venue_name_str)
+        zip_filename = f"{safe_venue_name}-{event_date_str}.zip"
 
-        if batch_num_str and batch_num_str.isdigit():
-            batch_num = int(batch_num_str)
-            start_index = (batch_num - 1) * batch_size
-            end_index = start_index + batch_size
-            photo_urls_to_zip = all_photo_urls[start_index:end_index]
-            download_suffix = f"_batch_{batch_num}"
+        cur.execute("SELECT photo_url FROM event_photos WHERE event_id=%s ORDER BY id;", (eid,))
+        photo_urls = [r[0] for r in cur.fetchall()]
+        if not photo_urls:
+            cur.close()
+            conn.close()
+            return jsonify({"message": "No photos found for this event."}), 200
 
+        import zipfile
+        zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for i, url in enumerate(photo_urls_to_zip):
+            for i, url in enumerate(photo_urls):
                 try:
                     filename = url.split('/')[-1] or f"photo_{i+1}.bin"
                     filename = re.sub(r'[^\w\.-]', '_', filename)
@@ -2161,28 +2229,25 @@ def download_event_photos_zip(eid):
                     resp.raise_for_status()
                     zf.writestr(filename, resp.content)
                 except Exception as ex:
-                    logger.warning(f"Skip photo {url} for event {eid}: {ex}")
-            
+                    logger.warning("Skip %s: %s", url, ex)
+
         zip_buffer.seek(0)
-        
-        response = send_file(
+        cur.close()
+        conn.close()
+        return send_file(
             zip_buffer,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=f"event_{eid}_photos{download_suffix}.zip",
-            last_modified=datetime.utcnow()
+            download_name=zip_filename, # Use the new dynamic filename
         )
-        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-        return response
-    
     except Exception as e:
-        logger.exception(f"download_event_photos_zip for event {eid} failed: {e}")
-        error_response = jsonify({"error": f"Failed to generate photo ZIP: {e}"})
-        error_response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-        return error_response, 500
-    finally:
-        if conn:
-            conn.close()
+        logger.exception("download_event_photos_zip failed")
+        try:
+            if 'conn' in locals() and conn:
+                conn.close()
+        except Exception:
+            pass
+        return jsonify({"error": str(e)}), 500
 
 # ------------------------------------------------------------------------------
 # Admin migrate PDF and sweeps
@@ -3100,19 +3165,59 @@ def admin_validate_event(eid):
     finally:
         conn.close()
 
-# Replace participation (rankings) (unchanged)
 @app.put("/admin/events/<int:eid>/participation")
 def admin_replace_participation(eid):
     d = request.json or {}
-    teams = d.get("teams") or []  # [{team_name, score, position, num_players, is_visiting, is_tournament}]
+    teams = d.get("teams") or []
     if not isinstance(teams, list):
-        return jsonify({"error":"teams must be an array"}), 400
+        return jsonify({"error": "teams must be an array"}), 400
 
     conn = getconn()
     try:
         cur = conn.cursor()
+        
+        # --- Start of Fix ---
+        # 1. Fetch the full event data needed for the AI recap first.
+        cur.execute("""
+            SELECT 
+                e.id, e.event_date, e.highlights, e.pdf_url, e.ai_recap, 
+                e.status, e.fb_event_url, e.show_type,
+                h.name AS host_name, v.name AS venue_name, 
+                v.default_day, v.default_time
+            FROM events e
+            LEFT JOIN hosts h ON e.host_id = h.id
+            LEFT JOIN venues v ON e.venue_id = v.id
+            WHERE e.id = %s;
+        """, (eid,))
+        event_row = cur.fetchone()
+        if not event_row:
+            return jsonify({"error": "Event not found"}), 404
+            
+        # 2. Map the row to the dictionary that format_ai_recap expects.
+        event_data = {
+            "id": event_row[0], "event_date": event_row[1], "highlights": event_row[2],
+            "pdf_url": event_row[3], "ai_recap": event_row[4], "status": event_row[5],
+            "fb_event_url": event_row[6], "show_type": event_row[7], "host_name": event_row[8],
+            "venue_name": event_row[9]
+        }
+        venue_defaults = {"default_day": event_row[10], "default_time": event_row[11]}
+        # --- End of Fix ---
+
         cur.execute("DELETE FROM event_participation WHERE event_id=%s", (eid,))
+        
+        # Sort teams by position from the frontend payload to find the winners
+        teams.sort(key=lambda t: t.get('position') or float('inf'))
+        winners = []
+
         for t in teams:
+            # Re-populate winners list based on the new, sorted data
+            if t.get("position") in (1, 2, 3) and len(winners) < 3:
+                winners.append({
+                    "name": t.get("team_name"),
+                    "score": t.get("score"),
+                    "playerCount": t.get("num_players"),
+                })
+
             cur.execute("""
                 INSERT INTO event_participation
                 (event_id, team_name, score, position, num_players, is_visiting, is_tournament, updated_at)
@@ -3121,8 +3226,14 @@ def admin_replace_participation(eid):
                 eid, t.get("team_name"), t.get("score"), t.get("position"),
                 t.get("num_players"), bool(t.get("is_visiting")), bool(t.get("is_tournament"))
             ))
+
+        # Now, call format_ai_recap with the correct dictionary and the new winners list
+        if winners:
+            ai_text = format_ai_recap(event_data, winners, venue_defaults)
+            cur.execute("UPDATE events SET ai_recap=%s, updated_at=NOW() WHERE id=%s;", (ai_text, eid))
+
         conn.commit()
-        return jsonify({"status":"ok", "count": len(teams)})
+        return jsonify({"status": "ok", "count": len(teams)})
     except Exception as e:
         conn.rollback()
         logger.exception("admin_replace_participation failed")
@@ -3410,54 +3521,84 @@ def admin_validate_tournament_scores(venue_id, week_ending):
 @app.post("/admin/bulk-upload-tournament-teams")
 def admin_bulk_upload_tournament_teams():
     """
-    Bulk uploads/updates tournament teams from a JSON array.
-    Requires existing venues; will NOT create new venues.
-    Teams with unmatchable home venues will be skipped and reported.
-    Uses fuzzy matching with DefaultNight to identify venues more flexibly.
+    Bulk upload:
+      - Tournament teams (upsert with venue matching, no venue creation)
+      - Events: skip duplicates; new ones are auto-validated and marked 'posted'
+    Duplicate event rule: same venue_id and event_date already exists.
+    Body:
+      {
+        "teams": [ { Name, HomeVenue, DefaultNight, CaptainName, CaptainEmail, CaptainCell, PlayerCount } ],
+        "events": [ { hostName, venueName, eventDate, highlights?, pdfUrl?, photoUrls?[] } ]
+      }
     """
-    teams_data = request.json
-    if not isinstance(teams_data, list):
-        return jsonify({"error": "Request body must be a JSON array of team objects"}), 400
+    payload = request.json or {}
+    teams_data: List[Dict[str, Any]] = payload.get("teams") or []
+    events_data: List[Dict[str, Any]] = payload.get("events") or []
+
+    if not isinstance(teams_data, list) or not isinstance(events_data, list):
+        return jsonify({"error": "teams and events must be arrays"}), 400
 
     results = {
-        "total_attempted": 0,
-        "teams_created": 0,
-        "teams_updated": 0,
-        "venues_not_found": 0, # Venues not matched uniquely
-        "skipped_errors": 0,
-        "errors": []
+        "teams": {
+            "total_attempted": 0,
+            "teams_created": 0,
+            "teams_updated": 0,
+            "venues_not_found": 0,
+            "skipped_errors": 0,
+            "errors": []
+        },
+        "events": {
+            "total_attempted": 0,
+            "inserted": 0,
+            "duplicates_skipped": 0,
+            "errors": [],
+            "inserted_ids": [],
+            "duplicate_samples": []
+        }
     }
 
     conn = getconn()
     try:
         cur = conn.cursor()
-        
-        # Pre-fetch all venue data (id, name, default_day) for efficient lookup
-        # Store both exact normalized name and also a list for fuzzy matching
+
+        # ------- Venue cache for team fuzzy matching -------
         cur.execute("SELECT id, name, default_day FROM venues;")
-        all_venues_db_rows = cur.fetchall() # List of (id, name, default_day)
+        all_venues_db_rows = cur.fetchall()
 
-        # For exact (normalized) matching
-        venue_exact_normalized_lookup = {} # normalized_name -> id
-        # For fuzzy matching
-        venue_fuzzy_list = [] # list of {"id": id, "name_raw": name, "name_normalized": name_normalized, "default_day_lower": default_day.lower()}
-
+        venue_exact_normalized_lookup = {}
+        venue_fuzzy_list = []
         for v_id, v_name, v_default_day in all_venues_db_rows:
-            normalized_name = re.sub(r'[^a-z0-9\s]', '', v_name.lower())
+            normalized_name = re.sub(r"[^a-z0-9\s]", "", (v_name or "").lower())
             venue_exact_normalized_lookup[normalized_name] = v_id
             venue_fuzzy_list.append({
                 "id": v_id,
-                "name_raw": v_name, # Keep raw name for error messages
-                "name_lower": v_name.lower(), # For substring check
-                "name_normalized": normalized_name, # For closer fuzzy match
+                "name_raw": v_name or "",
+                "name_lower": (v_name or "").lower(),
+                "name_normalized": normalized_name,
                 "default_day_lower": (v_default_day or "").lower()
             })
 
+        # ------- Helper: resolve host/venue ids by name (create if missing for hosts, not venues) -------
+        def resolve_host_id(name: str) -> int:
+            cur.execute("SELECT id FROM hosts WHERE lower(name)=lower(%s);", (name,))
+            r = cur.fetchone()
+            if r:
+                return r[0]
+            cur.execute("INSERT INTO hosts (name) VALUES (%s) RETURNING id;", (name,))
+            return cur.fetchone()[0]
 
+        def resolve_venue_id_strict(name: str) -> int:
+            cur.execute("SELECT id FROM venues WHERE lower(name)=lower(%s);", (name,))
+            r = cur.fetchone()
+            if r:
+                return r[0]
+            # Do NOT create new venues here
+            raise ValueError(f"Venue '{name}' not found")
+
+        # ------- TEAMS: upsert with fuzzy venue matching (no venue creation) -------
         for team_entry in teams_data:
-            results["total_attempted"] += 1
+            results["teams"]["total_attempted"] += 1
             try:
-                # Extract team data (defensively casting to string before stripping)
                 team_name = str(team_entry.get("Name") or "").strip()
                 home_venue_name_raw = str(team_entry.get("HomeVenue") or "").strip()
                 captain_name = str(team_entry.get("CaptainName") or "").strip()
@@ -3467,100 +3608,135 @@ def admin_bulk_upload_tournament_teams():
                 default_night_raw = str(team_entry.get("DefaultNight") or "").strip()
 
                 if not team_name:
-                    raise ValueError("Team 'Name' is required for each entry.")
+                    raise ValueError("Team 'Name' is required")
 
                 home_venue_id = None
                 if home_venue_name_raw:
-                    # Normalize input for matching
-                    input_venue_name_normalized = re.sub(r'[^a-z0-9\s]', '', home_venue_name_raw.lower())
-                    target_default_day_lower = default_night_raw.lower()
+                    input_norm = re.sub(r"[^a-z0-9\s]", "", home_venue_name_raw.lower())
+                    target_day = (default_night_raw or "").lower()
 
-                    # --- Matching Strategy ---
-
-                    # Phase 1: Try exact match using normalized name
-                    home_venue_id = venue_exact_normalized_lookup.get(input_venue_name_normalized)
-
+                    # exact normalized
+                    home_venue_id = venue_exact_normalized_lookup.get(input_norm)
+                    # fuzzy with default night filter
                     if home_venue_id is None:
-                        # Phase 2: If no exact match, try fuzzy matching with DefaultNight constraint
-                        potential_matches = []
-                        for venue_db_data in venue_fuzzy_list:
-                            v_name_lower = venue_db_data["name_lower"]
-                            v_name_normalized = venue_db_data["name_normalized"] # Using this for stricter fuzzy score
-                            v_default_day_lower = venue_db_data["default_day_lower"]
-
-                            # Only consider venues that play on the team's default night
-                            if v_default_day_lower == target_default_day_lower:
-                                # Calculate a similarity score (difflib.SequenceMatcher.ratio)
-                                # Compare against both raw lowercased name and normalized name
-                                ratio1 = difflib.SequenceMatcher(None, input_venue_name_normalized, v_name_normalized).ratio()
-                                # Using a more lenient threshold for now, can be adjusted (0.6-0.8 typically)
-                                if ratio1 > 0.6: 
-                                    potential_matches.append((venue_db_data, ratio1))
-                        
-                        # Sort matches by similarity ratio in descending order
-                        potential_matches.sort(key=lambda x: x[1], reverse=True)
-
-                        if len(potential_matches) > 0 and potential_matches[0][1] > 0.7: # Only if best match is sufficiently good
-                            best_match_data, best_ratio = potential_matches[0]
-                            
-                            # Check if there's another match with a very close score (ambiguity)
-                            is_ambiguous = False
-                            if len(potential_matches) > 1 and (best_ratio - potential_matches[1][1] < 0.1): # If next best is within 10%
-                                is_ambiguous = True
-
-                            if not is_ambiguous:
-                                home_venue_id = best_match_data["id"]
-                                logger.info(f"Fuzzy matched '{home_venue_name_raw}' to '{best_match_data['name_raw']}' (ID: {home_venue_id}, Ratio: {best_ratio:.2f}) on {default_night_raw}.")
+                        candidates = []
+                        for v in venue_fuzzy_list:
+                            if v["default_day_lower"] == target_day:
+                                ratio = difflib.SequenceMatcher(None, input_norm, v["name_normalized"]).ratio()
+                                if ratio > 0.6:
+                                    candidates.append((v, ratio))
+                        candidates.sort(key=lambda x: x[1], reverse=True)
+                        if candidates and candidates[0][1] > 0.7:
+                            best, best_ratio = candidates[0]
+                            ambiguous = len(candidates) > 1 and (best_ratio - candidates[1][1] < 0.1)
+                            if not ambiguous:
+                                home_venue_id = best["id"]
+                                logger.info(f"Fuzzy matched '{home_venue_name_raw}' -> '{best['name_raw']}' ({best_ratio:.2f})")
                             else:
-                                match_names = [data["name_raw"] for data, ratio in potential_matches if ratio > 0.6] # Show only good matches
-                                results["venues_not_found"] += 1 # Count as not found due to ambiguity
-                                raise ValueError(f"HomeVenue '{home_venue_name_raw}' (for {default_night_raw}) is ambiguous. Matches multiple venues closely: '{', '.join(match_names)}'. Team skipped.")
+                                results["teams"]["venues_not_found"] += 1
+                                names = [d["name_raw"] for d, r in candidates if r > 0.6]
+                                raise ValueError(f"HomeVenue '{home_venue_name_raw}' ambiguous: {', '.join(names)}")
                         else:
-                            # No match found or none were sufficiently good
-                            results["venues_not_found"] += 1
-                            raise ValueError(f"HomeVenue '{home_venue_name_raw}' not found in existing venues (even with fuzzy match for {default_night_raw}). Team skipped.")
+                            results["teams"]["venues_not_found"] += 1
+                            raise ValueError(f"HomeVenue '{home_venue_name_raw}' not found (fuzzy)")
 
-                # 2. Find or Update/Create Team (unchanged from previous turn)
-                cur.execute("SELECT id FROM tournament_teams WHERE lower(name) = lower(%s);", (team_name,))
-                team_row = cur.fetchone()
-
-                if team_row:
-                    # Team exists, update it
+                # Upsert team by name
+                cur.execute("SELECT id FROM tournament_teams WHERE lower(name)=lower(%s);", (team_name,))
+                row = cur.fetchone()
+                if row:
                     cur.execute(
                         """
                         UPDATE tournament_teams
-                        SET home_venue_id=%s, captain_name=%s, captain_email=%s, captain_phone=%s, player_count=%s
-                        WHERE id=%s;
+                           SET home_venue_id=%s, captain_name=%s, captain_email=%s,
+                               captain_phone=%s, player_count=%s
+                         WHERE id=%s
                         """,
-                        (home_venue_id, captain_name, captain_email, captain_phone, player_count, team_row[0])
+                        (home_venue_id, captain_name, captain_email, captain_phone, player_count, row[0])
                     )
-                    results["teams_updated"] += 1
-                    logger.info(f"Updated team: {team_name} (ID: {team_row[0]})")
+                    results["teams"]["teams_updated"] += 1
                 else:
-                    # Team does not exist, insert it
                     cur.execute(
                         """
-                        INSERT INTO tournament_teams (name, home_venue_id, captain_name, captain_email, captain_phone, player_count)
-                        VALUES (%s, %s, %s, %s, %s, %s);
+                        INSERT INTO tournament_teams
+                            (name, home_venue_id, captain_name, captain_email, captain_phone, player_count)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         """,
                         (team_name, home_venue_id, captain_name, captain_email, captain_phone, player_count)
                     )
-                    results["teams_created"] += 1
-                    logger.info(f"Created new team: {team_name}")
+                    results["teams"]["teams_created"] += 1
 
             except Exception as e:
-                results["skipped_errors"] += 1
-                team_name_for_error = team_entry.get('Name', 'UNKNOWN') or 'UNKNOWN'
-                results["errors"].append(f"Failed to process team '{team_name_for_error}': {str(e)}")
-                logger.error(f"Error processing bulk upload entry: {str(e)}", exc_info=True)
-        
-        conn.commit() # Commit all changes if no unhandled exceptions
+                results["teams"]["skipped_errors"] += 1
+                tn = (team_entry.get("Name") or "UNKNOWN")
+                results["teams"]["errors"].append(f"Team '{tn}': {e}")
+                logger.error(f"Bulk team error: {e}", exc_info=True)
+
+        # ------- EVENTS: skip duplicates, auto-validate/post new -------
+        for ev in events_data:
+            results["events"]["total_attempted"] += 1
+            try:
+                host_name = (ev.get("hostName") or "").strip()
+                venue_name = (ev.get("venueName") or "").strip()
+                event_date = (ev.get("eventDate") or "").strip()  # YYYY-MM-DD
+                highlights = ev.get("highlights") or ""
+                pdf_url = ev.get("pdfUrl") or ""
+                photo_urls = ev.get("photoUrls") or []
+
+                if not host_name or not venue_name or not event_date:
+                    raise ValueError("hostName, venueName, and eventDate are required")
+
+                host_id = resolve_host_id(host_name)
+                venue_id = resolve_venue_id_strict(venue_name)
+
+                # Duplicate check: venue_id + event_date
+                cur.execute(
+                    "SELECT id FROM events WHERE venue_id=%s AND event_date=%s LIMIT 1;",
+                    (venue_id, event_date),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    results["events"]["duplicates_skipped"] += 1
+                    if len(results["events"]["duplicate_samples"]) < 20:
+                        results["events"]["duplicate_samples"].append(existing[0])
+                    continue
+
+                # Insert event
+                cur.execute(
+                    """
+                    INSERT INTO events (host_id, venue_id, event_date, highlights, pdf_url, status)
+                    VALUES (%s,%s,%s,%s,%s,'ready') RETURNING id;
+                    """,
+                    (host_id, venue_id, event_date, highlights, pdf_url),
+                )
+                event_id = cur.fetchone()[0]
+
+                # Insert photos
+                for url in photo_urls:
+                    cur.execute(
+                        "INSERT INTO event_photos (event_id, photo_url) VALUES (%s,%s);",
+                        (event_id, url),
+                    )
+
+                # Auto-validate/post: set status to 'posted' and stamp fb_event_url
+                cur.execute(
+                    "UPDATE events SET status='posted', fb_event_url=COALESCE(fb_event_url, 'historical-import') WHERE id=%s;",
+                    (event_id,),
+                )
+
+                results["events"]["inserted"] += 1
+                results["events"]["inserted_ids"].append(event_id)
+
+            except Exception as e:
+                results["events"]["errors"].append(str(e))
+                logger.error(f"Bulk event error: {e}", exc_info=True)
+
+        conn.commit()
         return jsonify({"status": "ok", "summary": results})
 
     except Exception as e:
-        conn.rollback() # Rollback all changes if an error occurs in the outer block
-        logger.exception("admin_bulk_upload_tournament_teams failed during transaction")
-        return jsonify({"error": f"Bulk upload failed: {str(e)}", "partial_results": results}), 500
+        conn.rollback()
+        logger.exception("bulk upload failed")
+        return jsonify({"error": str(e), "partial": results}), 500
     finally:
         conn.close()
 

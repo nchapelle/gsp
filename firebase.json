@@ -1,0 +1,40 @@
+{
+  "hosting": {
+    "public": "frontend",     // CRITICAL: This tells Firebase that your public files are in the 'frontend' folder
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+  "rewrites": [
+      { "source": "/hosts", "destination": "/hosts.html" },
+      { "source": "/host/event", "destination": "/host-event.html" },
+
+      { "source": "/smm", "destination": "/smm.html" },
+      { "source": "/smm/event", "destination": "/smm-event.html" },
+
+
+      { "source": "/admin", "destination": "/admin.html" },
+      { "source": "/admin/event", "destination": "/admin-event.html" },
+
+      { "source": "/admin/data", "destination": "/admin-data.html" },
+      { "source": "/tournament/teams", "destination": "/tournament-teams.html" },
+      { "source": "/tournament/admin", "destination": "/tournament-admin.html" },
+
+      { "source": "/tournament/scores", "destination": "/tournament-scores.html" },
+      { "source": "/tournament/scores/:venue", "destination": "/tournament-venue.html" },
+      { "source": "/tournament/scores/:venue/:date", "destination": "/tournament-venue-week.html" }
+  ],
+    "headers": [
+      {
+        "source": "/assets/*.{js,css,png,jpg,jpeg,gif,svg}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000" // Cache assets for 1 year
+          }
+        ]
+      }
+    ]
+  }
+}

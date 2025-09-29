@@ -91,6 +91,89 @@
       return;
     }
 
+  // --- Drag-and-Drop Logic (Scoped to this function) ---
+    function wireDragAndDrop() {
+        const container = getEl('partsContainer');
+        if (!container) return;
+
+        let dragSourceElement = null;
+
+        container.addEventListener('dragstart', e => {
+            const target = e.target.closest('.team-block');
+            if (target) {
+                dragSourceElement = target;
+                e.dataTransfer.effectAllowed = 'move';
+                setTimeout(() => target.classList.add('dragging'), 0);
+            }
+        });
+
+        container.addEventListener('dragend', e => {
+            const target = e.target.closest('.team-block');
+            if (target) {
+                target.classList.remove('dragging');
+            }
+            dragSourceElement = null;
+        });
+
+        container.addEventListener('dragover', e => {
+            e.preventDefault();
+            const target = e.target.closest('.team-block');
+            container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            if (target && target !== dragSourceElement) {
+                target.classList.add('drag-over');
+            }
+        });
+
+        container.addEventListener('dragleave', e => {
+            e.target.closest('.team-block')?.classList.remove('drag-over');
+        });
+
+        container.addEventListener('drop', e => {
+            e.preventDefault();
+            const dropTargetElement = e.target.closest('.team-block');
+            container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+            if (!dragSourceElement || !dropTargetElement || dragSourceElement === dropTargetElement) {
+                return;
+            }
+
+            const allTeamBlocks = Array.from(container.querySelectorAll('.team-block'));
+            const sourceIndex = allTeamBlocks.indexOf(dragSourceElement);
+            const targetIndex = allTeamBlocks.indexOf(dropTargetElement);
+
+            const getData = (block) => ({
+                name: block.querySelector('.part-name').value,
+                players: block.querySelector('.part-players').value,
+                visiting: block.querySelector('.part-vis').checked,
+                tournament: block.querySelector('.part-tour').checked
+            });
+
+            const setData = (block, data) => {
+                block.querySelector('.part-name').value = data.name;
+                block.querySelector('.part-players').value = data.players;
+                block.querySelector('.part-vis').checked = data.visiting;
+                block.querySelector('.part-tour').checked = data.tournament;
+            };
+
+            const sourceData = getData(dragSourceElement);
+
+            if (sourceIndex < targetIndex) {
+                // Dragging DOWN: Shift elements UP
+                for (let i = sourceIndex; i < targetIndex; i++) {
+                    const nextData = getData(allTeamBlocks[i + 1]);
+                    setData(allTeamBlocks[i], nextData);
+                }
+            } else {
+                // Dragging UP: Shift elements DOWN
+                for (let i = sourceIndex; i > targetIndex; i--) {
+                    const prevData = getData(allTeamBlocks[i - 1]);
+                    setData(allTeamBlocks[i], prevData);
+                }
+            }
+            setData(allTeamBlocks[targetIndex], sourceData);
+        });
+    }
+
     // --- Tournament Scoring Logic (Scoped to this function) ---
     let allTournamentTeams = []; // Cache for fuzzy matching
 
@@ -173,20 +256,31 @@
       }).join('');
     }
     // --- End of Tournament Scoring Logic ---
-
     function participationRowTpl(r) {
       return `
-      <div class="grid-3 part-row" style="margin:8px 0;">
-        <input class="input part-position" type="number" min="1" placeholder="Pos" value="${r.position || ''}" />
-        <input class="input part-name" placeholder="Team Name" value="${r.team_name || ''}" />
-        <input class="input part-score" type="number" placeholder="Score" value="${r.score != null ? r.score : ''}" />
-        <input class="input part-players" type="number" placeholder="# Players" value="${r.num_players != null ? r.num_players : ''}" />
-        <label class="kv-inline"><input type="checkbox" class="part-vis" ${r.is_visiting ? 'checked' : ''}/> Visiting</label>
-        <label class="kv-inline"><input type="checkbox" class="part-tour" ${r.is_tournament ? 'checked' : ''}/> Tournament</label>
-        <button type="button" class="btn btn-ghost del-part-row" style="margin-left:auto;">Delete</button>
+      <div class="part-row" style="display: grid; grid-template-columns: 80px 1fr 150px; gap: 12px; align-items: center; margin: 8px 0; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+        
+        <!-- Column 1: Position (Not Draggable) -->
+        <input class="input part-position" type="number" min="1" placeholder="Pos" value="${r.position || ''}" style="text-align: center; font-weight: bold;" />
+        
+        <!-- Column 2: Draggable Team Block -->
+        <div class="team-block" draggable="true">
+            <input class="input part-name" placeholder="Team Name" value="${r.team_name || ''}" />
+            <div style="display: flex; gap: 10px; margin-top: 6px; align-items: center; padding-left: 4px;">
+                <input class="input part-players" type="number" placeholder="# Players" value="${r.num_players != null ? r.num_players : ''}" style="max-width: 120px;" />
+                <label class="kv-inline" style="flex-shrink: 0; white-space: nowrap;"><input type="checkbox" class="part-vis" ${r.is_visiting ? 'checked' : ''}/> Visiting</label>
+                <label class="kv-inline" style="flex-shrink: 0; white-space: nowrap;"><input type="checkbox" class="part-tour" ${r.is_tournament ? 'checked' : ''}/> Tournament</label>
+            </div>
+        </div>
+
+        <!-- Column 3: Score and Delete (Not Draggable) -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <input class="input part-score" type="number" placeholder="Score" value="${r.score != null ? r.score : ''}" />
+            <button type="button" class="btn btn-ghost del-part-row" style="flex-shrink: 0; padding: 8px 12px;">X</button>
+        </div>
       </div>`;
     }
-
+    
     async function load() {
       GSP.clearStatus(statusEl);
       try {
@@ -300,23 +394,6 @@
       }
     });
 
-    getEl('parseBtn')?.addEventListener('click', async () => {
-      GSP.clearStatus(statusEl);
-      GSP.status(statusEl, 'info', 'Parsing PDF and generating AI recap...');
-      try {
-        const response = await GSP.j(`${API}/events/${eid}/parse-pdf`, { method: 'POST' });
-        if (response.status === 'success' && response.ai_recap_generated) {
-          getEl('aiRecap').value = response.ai_recap_generated;
-          GSP.status(statusEl, 'success', 'Parse triggered and AI recap generated.');
-        } else {
-          GSP.status(statusEl, 'error', response.error || 'Parse triggered but no teams or AI recap found.');
-        }
-        load();
-      } catch (err) {
-        GSP.status(statusEl, 'error', `Parse failed: ${err.message}`);
-      }
-    });
-    
     // Wire up the save button for tournament scores
     const saveTourneyScoresBtn = getEl('saveTourneyScoresBtn');
     if (saveTourneyScoresBtn) {
@@ -348,9 +425,70 @@
       });
     }
 
-    // ... continue wiring for all other buttons: import, migrate, addPhoto, validate, viewPdf ...
+    getEl('parseBtn')?.addEventListener('click', async () => {
+      GSP.clearStatus(statusEl);
+      GSP.status(statusEl, 'info', 'Parsing PDF and generating AI recap...');
+      try {
+        const response = await GSP.j(`${API}/events/${eid}/parse-pdf`, { method: 'POST' });
+        if (response.status === 'success' && response.ai_recap_generated) {
+          getEl('aiRecap').value = response.ai_recap_generated;
+          GSP.status(statusEl, 'success', 'Parse triggered and AI recap generated.');
+        } else {
+          GSP.status(statusEl, 'error', response.error || 'Parse triggered but no teams or AI recap found.');
+        }
+        load();
+      } catch (err) {
+        GSP.status(statusEl, 'error', `Parse failed: ${err.message}`);
+      }
+    });
+    getEl('addPhotoUrlBtn')?.addEventListener('click', async () => {
+      GSP.clearStatus(statusEl);
+      const photoUrlInput = getEl('photoUrlInput');
+      const u = (photoUrlInput.value || '').trim();
+      if (!u) {
+        GSP.status(statusEl, 'error', 'Enter a photo URL.');
+        return;
+      }
+      try {
+        await GSP.j(`${API}/admin/events/${eid}/photos`, {
+          method: 'POST',
+          body: JSON.stringify({ photoUrl: u })
+        });
+        photoUrlInput.value = '';
+        GSP.status(statusEl, 'success', 'Photo linked.');
+        load();
+      } catch (err) {
+        GSP.status(statusEl, 'error', 'Add photo failed: ' + err.message);
+      }
+    });
+
+    getEl('validateEventBtn')?.addEventListener('click', async () => {
+      GSP.clearStatus(statusEl);
+      const validateBtn = getEl('validateEventBtn');
+      const isCurrentlyValidated = validateBtn.textContent === 'Unvalidate Event';
+      try {
+        await GSP.j(`${API}/admin/events/${eid}/validate`, {
+          method: 'PUT',
+          body: JSON.stringify({ is_validated: !isCurrentlyValidated }),
+        });
+        GSP.status(statusEl, 'success', `Event ${!isCurrentlyValidated ? 'validated' : 'unvalidated'}.`);
+        load();
+      } catch (err) {
+        GSP.status(statusEl, 'error', 'Validation update failed: ' + err.message);
+      }
+    });
+
+    getEl('viewPdfOriginalBtn')?.addEventListener('click', () => {
+      const pdfUrl = getEl('pdfUrl').value;
+      if (pdfUrl) {
+        window.open(pdfUrl, '_blank');
+      } else {
+        GSP.status(statusEl, 'error', 'No PDF URL available to view.');
+      }
+    });
     
     load(); // Initial load for the page
+    wireDragAndDrop(); // Wire drag-and-drop listeners ONCE on initialization
   }
 
   // --- EXPOSE TO GLOBAL SCOPE for main.js router ---
