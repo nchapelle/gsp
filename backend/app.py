@@ -1226,7 +1226,7 @@ def debug_direct_upload():
 @app.route("/migrate", methods=["POST"])
 def migrate():
     """
-    Builds the entire database schema from scratch.
+    Builds the entire database schema from scratch to match the current state.
     This route is idempotent and safe to run on an existing or empty database.
     It creates all tables, columns, constraints, and indexes in the correct order.
     """
@@ -1234,7 +1234,7 @@ def migrate():
     try:
         cur = conn.cursor()
 
-        # --- Base Tables (No Dependencies) ---
+        # --- Base Tables (No External Dependencies) ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS hosts (
               id SERIAL PRIMARY KEY,
@@ -1256,123 +1256,97 @@ def migrate():
             CREATE TABLE IF NOT EXISTS tournament_weeks (
               id SERIAL PRIMARY KEY,
               week_ending DATE UNIQUE NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+              created_at TIMESTAMP DEFAULT now()
             );
         """)
 
-        # --- Tables with Dependencies ---
+        # --- Tables with Dependencies on Base Tables ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tournament_teams (
               id SERIAL PRIMARY KEY,
               name TEXT UNIQUE NOT NULL,
-              home_venue_id INT REFERENCES venues(id),
+              home_venue_id INTEGER,
               captain_name TEXT,
               captain_email TEXT,
               captain_phone TEXT,
-              player_count INT,
-              access_key TEXT UNIQUE,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+              player_count INTEGER,
+              created_at TIMESTAMP DEFAULT now(),
+              access_key TEXT UNIQUE
             );
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS events (
               id SERIAL PRIMARY KEY,
-              host_id INT REFERENCES hosts(id),
-              venue_id INT REFERENCES venues(id),
-              event_date DATE NOT NULL,
+              host_id INTEGER REFERENCES hosts(id),
+              venue_id INTEGER UNIQUE,
+              event_date DATE UNIQUE NOT NULL,
               highlights TEXT,
               pdf_url TEXT,
               ai_recap TEXT,
               status TEXT DEFAULT 'unposted',
               fb_event_url TEXT,
-              is_validated BOOLEAN DEFAULT FALSE,
+              created_at TIMESTAMP DEFAULT now(),
               show_type TEXT DEFAULT 'gsp',
-              total_players INT,
-              total_teams INT,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-              updated_at TIMESTAMP WITH TIME ZONE
+              updated_at TIMESTAMP,
+              is_validated BOOLEAN DEFAULT false,
+              total_players INTEGER,
+              total_teams INTEGER,
+              CONSTRAINT uniq_venue_date UNIQUE (venue_id, event_date)
             );
         """)
-        cur.execute("""
-            DO $$
-            BEGIN
-              IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uniq_venue_date') THEN
-                ALTER TABLE events ADD CONSTRAINT uniq_venue_date UNIQUE (venue_id, event_date);
-              END IF;
-            END$$;
-        """)
-        
-        # --- Tables with Foreign Key to Events ---
+
+        # --- Tables with a Foreign Key to Events ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS event_photos (
               id SERIAL PRIMARY KEY,
-              event_id INT REFERENCES events(id) ON DELETE CASCADE,
+              event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
               photo_url TEXT
             );
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS event_participation (
               id SERIAL PRIMARY KEY,
-              event_id INT REFERENCES events(id) ON DELETE CASCADE,
+              event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
               team_name TEXT,
-              tournament_team_id INT, -- Note: Not a strict FK to allow for non-tournament teams
-              score INT,
-              position INT,
-              num_players INT,
-              is_visiting BOOLEAN DEFAULT FALSE,
-              is_tournament BOOLEAN DEFAULT FALSE,
-              updated_at TIMESTAMP WITH TIME ZONE
+              tournament_team_id INTEGER,
+              score INTEGER,
+              position INTEGER,
+              num_players INTEGER,
+              is_visiting BOOLEAN DEFAULT false,
+              is_tournament BOOLEAN DEFAULT false,
+              updated_at TIMESTAMP
             );
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS event_parse_log (
               id SERIAL PRIMARY KEY,
-              event_id INT REFERENCES events(id) ON DELETE CASCADE,
+              event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
               raw_text_gz BYTEA,
               parsed_json JSONB,
               status TEXT,
               error TEXT,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+              created_at TIMESTAMP DEFAULT now()
             );
         """)
 
-        # --- Final Tournament Scores Table (robust structure) ---
+        # --- Final Tournament Scores Table (Connects multiple tables) ---
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tournament_team_scores (
               id SERIAL PRIMARY KEY,
-              tournament_team_id INT REFERENCES tournament_teams(id) ON DELETE CASCADE NOT NULL,
-              venue_id INT REFERENCES venues(id) ON DELETE CASCADE NOT NULL,
-              week_id INT REFERENCES tournament_weeks(id) ON DELETE CASCADE NOT NULL,
-              event_id INT REFERENCES events(id) ON DELETE SET NULL, -- Track source event, but allow manual entries
-              points INT DEFAULT 0,
-              num_players INT,
-              is_validated BOOLEAN DEFAULT FALSE,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-              UNIQUE (tournament_team_id, venue_id, week_id)
+              tournament_team_id INTEGER UNIQUE NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
+              venue_id INTEGER UNIQUE NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+              week_id INTEGER UNIQUE NOT NULL REFERENCES tournament_weeks(id) ON DELETE CASCADE,
+              event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+              points INTEGER DEFAULT 0,
+              num_players INTEGER,
+              is_validated BOOLEAN DEFAULT false,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+              CONSTRAINT tournament_team_scores_tournament_team_id_venue_id_week_id_key
+                UNIQUE (tournament_team_id, venue_id, week_id)
             );
         """)
 
-        cur.execute("""
-            DO $$
-            BEGIN
-              -- First, drop the old constraint if it exists
-              IF EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'uniq_venue_date'
-              ) THEN
-                ALTER TABLE events DROP CONSTRAINT uniq_venue_date;
-              END IF;
-
-              -- Now, add the new, more specific three-column constraint
-              IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'uniq_event_by_venue_date_type'
-              ) THEN
-                ALTER TABLE events
-                  ADD CONSTRAINT uniq_event_by_venue_date_type UNIQUE (venue_id, event_date, show_type);
-              END IF;
-            END$$;
-        """)
-
-        # --- Indexes for Performance ---
+        # --- Indexes for Performance (PostgreSQL creates unique indexes for PRIMARY KEY and UNIQUE constraints automatically) ---
         cur.execute("CREATE INDEX IF NOT EXISTS idx_event_photos_event ON event_photos(event_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_event_participation_event_pos ON event_participation(event_id, position);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tts_team_week ON tournament_team_scores(tournament_team_id, week_id);")
@@ -3247,50 +3221,107 @@ def get_week_ending(event_date: date) -> date:
     days_until_sunday = 6 - event_date.weekday()
     return event_date + timedelta(days=days_until_sunday)
 
-@app.put("/admin/events/<int:eid>/tournament-scores")
-def save_tournament_scores(eid):
+@app.put("/admin/events/<int:event_id>/tournament-scores")
+def save_tournament_scores_for_event(event_id):
     """
-    Receives an array of tournament score assignments for a given event
-    and upserts them into the tournament_team_scores table.
-    Body: [{ "participation_id": pid, "tournament_team_id": tid, "points": p, "team_name": "name" }]
+    Saves or updates tournament scores for an event.
+    This version STRICTLY checks that the event's date falls within a pre-defined
+    tournament week from the 'tournament_weeks' table. It will NOT create new weeks.
     """
-    assignments = request.json or []
-    conn = getconn()
+    conn = None
     try:
-        cur = conn.cursor()
+        # --- Robust JSON Parsing (from previous fix) ---
+        data = request.get_json(silent=True)
+        if data is None:
+            logging.warning(f"Could not parse JSON from headers for event {event_id}. Attempting raw body.")
+            try:
+                data = json.loads(request.data)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Malformed JSON in request body."}), 400
         
-        # Get the event's date to determine the week_ending
-        cur.execute("SELECT event_date, venue_id FROM events WHERE id=%s;", (eid,))
-        event_row = cur.fetchone()
-        if not event_row:
-            return jsonify({"error": "Event not found"}), 404
-        event_date, venue_id = event_row
-        week_ending = get_week_ending(event_date)
+        teams = data.get("teams")
+        if not isinstance(teams, list):
+            return jsonify({"error": "Request body must contain a 'teams' list."}), 400
 
-        updated_count = 0
-        for assign in assignments:
-            team_id = assign.get("tournament_team_id")
-            points = assign.get("points")
+        conn = getconn()
+        cur = conn.cursor()
+
+        # 1. Get event details (venue_id, event_date)
+        cur.execute("SELECT venue_id, event_date FROM events WHERE id = %s;", (event_id,))
+        event_details = cur.fetchone()
+        if not event_details:
+            return jsonify({"error": f"Event with id {event_id} not found."}), 404
+        
+        venue_id, event_date = event_details
+        if not venue_id or not event_date:
+            return jsonify({"error": "Event is missing required venue_id or event_date."}), 400
+
+        # --- NEW LOGIC: STRICTLY FIND THE TOURNAMENT WEEK ---
+        # 2. Calculate the theoretical week-ending date (the Sunday of the event's week)
+        day_of_week = event_date.weekday()  # Monday=0, Sunday=6
+        days_to_sunday = 6 - day_of_week
+        week_ending_date = event_date + timedelta(days=days_to_sunday)
+
+        # 3. Look up this date in the pre-populated tournament_weeks table.
+        cur.execute("SELECT id FROM tournament_weeks WHERE week_ending = %s;", (week_ending_date,))
+        week_row = cur.fetchone()
+        
+        if not week_row:
+            # If no week is found, stop and return a clear error.
+            error_msg = f"No valid tournament week found for the week ending {week_ending_date}. Please ensure this week exists in the system before saving scores."
+            logging.warning(f"Failed to save scores for event {event_id}: {error_msg}")
+            return jsonify({"error": error_msg}), 404 # 404 is appropriate as a required resource (the week) is missing.
+
+        week_id = week_row[0]
+        # --- END OF NEW LOGIC ---
+
+        # 4. Loop through teams and perform an UPSERT (this logic remains the same)
+        upserted_count = 0
+        for team_data in teams:
+            if not isinstance(team_data, dict):
+                logging.error(f"FATAL: Item in 'teams' list was not a dictionary. Type: {type(team_data)}")
+                return jsonify({"error": "Invalid data structure in 'teams' array."}), 400
+
+            team_id = team_data.get("team_id")
+            points = team_data.get("points")
+            num_players = team_data.get("num_players")
+
             if team_id is None or points is None:
                 continue
 
-            # UPSERT logic: Insert or update points for this team from this event
-            cur.execute("""
-                INSERT INTO tournament_team_scores (tournament_team_id, event_id, venue_id, week_ending, points_gained)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (tournament_team_id, event_id)
-                DO UPDATE SET points_gained = EXCLUDED.points_gained;
-            """, (team_id, eid, venue_id, week_ending, points))
-            updated_count += 1
-            
+            cur.execute(
+                """
+                INSERT INTO tournament_team_scores
+                    (tournament_team_id, venue_id, week_id, event_id, points, num_players, is_validated)
+                VALUES (%s, %s, %s, %s, %s, %s, true)
+                ON CONFLICT (tournament_team_id, venue_id, week_id)
+                DO UPDATE SET
+                    points = EXCLUDED.points,
+                    num_players = EXCLUDED.num_players,
+                    event_id = EXCLUDED.event_id,
+                    is_validated = true,
+                    updated_at = NOW();
+                """,
+                (team_id, venue_id, week_id, event_id, points, num_players)
+            )
+            upserted_count += 1
+        
         conn.commit()
-        return jsonify({"status": "ok", "message": f"{updated_count} tournament scores saved for event {eid}."})
+        return jsonify({
+            "status": "ok",
+            "message": f"Successfully saved/updated {upserted_count} scores for the week ending {week_ending_date.strftime('%Y-%m-%d')}.",
+            "event_id": event_id,
+            "week_id": week_id
+        })
+
     except Exception as e:
-        conn.rollback()
-        logger.exception(f"Failed to save tournament scores for event {eid}")
+        if conn:
+            conn.rollback()
+        logging.exception(f"Critical failure in save_tournament_scores for event {event_id}")
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 # Add/remove photo by URL (unchanged)
@@ -3484,40 +3515,117 @@ def put_tournament_scores():
     finally:
         conn.close()
 
+
 # NEW ADMIN ENDPOINT: Validate Tournament Scores
 @app.put("/admin/tournament/scores/<int:venue_id>/<string:week_ending>/validate")
-def admin_validate_tournament_scores(venue_id, week_ending):
-    d = request.get_json(silent=True) or {}
-    validate_status = bool(d.get("is_validated", True)) # Default to True
+def validate_tournament_scores(venue_id, week_ending):
+    """
+    Updates tournament_team_scores for the matching event at venue_id in week_ending.
+    - Finds/creates week_id from tournament_weeks using week_ending.
+    - Finds matching event_id.
+    - Inserts rows from body into tournament_team_scores, mapping team_name to tournament_team_id.
+    - Sets is_validated = true.
+    Body: { teams: [ { position, team_name, score, num_players, is_visiting, is_tournament, team_id? (optional) } ] }
+    Note: Maps score to points; assumes position not directly used (add if needed).
+    """
+    data = request.json or {}
+    teams = data.get("teams") or []
+    if not isinstance(teams, list) or not teams:
+        return jsonify({"error": "Body must include 'teams' array with participation data"}), 400
 
     conn = getconn()
     try:
         cur = conn.cursor()
-        
-        # Ensure week_ending exists and get its ID
-        cur.execute("SELECT id FROM tournament_weeks WHERE week_ending=%s;", (week_ending,))
-        week_row = cur.fetchone()
-        if not week_row:
-            return jsonify({"error": "week_ending not found"}), 404
-        week_id = week_row[0]
 
+        # 1. Parse week_ending and calculate range (Mon-Sun)
+        try:
+            end_date = datetime.strptime(week_ending, "%Y-%m-%d").date()
+            if end_date.weekday() != 6:
+                return jsonify({"error": "week_ending must be a Sunday (YYYY-MM-DD)"}), 400
+            start_date = end_date - timedelta(days=6)
+        except ValueError:
+            return jsonify({"error": "Invalid week_ending format (YYYY-MM-DD)"}), 400
+
+        # 2. Find/create week_id in tournament_weeks
+        cur.execute("SELECT id FROM tournament_weeks WHERE week_ending = %s;", (end_date,))
+        week_row = cur.fetchone()
+        if week_row:
+            week_id = week_row[0]
+        else:
+            # Create if missing (adjust columns if more needed, e.g., start_date)
+            cur.execute(
+                """
+                INSERT INTO tournament_weeks (week_ending) VALUES (%s) RETURNING id;
+                """,
+                (end_date,)
+            )
+            week_id = cur.fetchone()[0]
+            logger.info(f"Created tournament_weeks id {week_id} for {week_ending}")
+
+        # 3. Find matching event_id
         cur.execute(
             """
-            UPDATE tournament_team_scores
-            SET is_validated=%s
-            WHERE venue_id=%s AND week_id=%s;
+            SELECT id FROM events
+            WHERE venue_id = %s
+              AND event_date >= %s
+              AND event_date <= %s
+            LIMIT 1
             """,
-            (validate_status, venue_id, week_id)
+            (venue_id, start_date, end_date)
         )
+        event_row = cur.fetchone()
+        if not event_row:
+            return jsonify({"error": f"No event found for venue {venue_id} in week ending {week_ending}"}), 404
+
+        event_id = event_row[0]
+
+        # 4. Insert into tournament_team_scores, mapping team_name to tournament_team_id
+        inserted = 0
+        for team in teams:
+            team_name = team.get("team_name")
+            team_id = team.get("team_id")  # Use if provided
+
+            # Map if team_id not provided
+            if not team_id and team_name:
+                cur.execute("SELECT id FROM tournament_teams WHERE lower(name) = lower(%s);", (team_name,))
+                id_row = cur.fetchone()
+                if not id_row:
+                    return jsonify({"error": f"Team '{team_name}' not found in tournament_teams"}), 404
+                team_id = id_row[0]
+
+            # Insert (adjust if you want upsert instead of insert)
+            cur.execute(
+                """
+                INSERT INTO tournament_team_scores 
+                    (tournament_team_id, venue_id, week_id, event_id, points, num_players, is_validated, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, true, NOW());
+                """,
+                (
+                    team_id,
+                    venue_id,
+                    week_id,
+                    event_id,
+                    team.get("score"),  # Maps to points
+                    team.get("num_players"),
+                )
+            )
+            inserted += 1
+
         conn.commit()
-        return jsonify({"status": "ok", "is_validated": validate_status, "venue_id": venue_id, "week_ending": week_ending})
+        return jsonify({
+            "status": "ok",
+            "message": "tournament_team_scores updated with manual data and is_validated set to true",
+            "event_id": event_id,
+            "week_id": week_id,
+            "inserted_count": inserted
+        })
+
     except Exception as e:
         conn.rollback()
-        logger.exception(f"admin_validate_tournament_scores for venue {venue_id}, week {week_ending} failed")
+        logger.exception(f"Score update failed for venue {venue_id} week {week_ending}")
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
-
+        conn.close()        
 @app.post("/admin/bulk-upload-tournament-teams")
 def admin_bulk_upload_tournament_teams():
     """
@@ -3656,7 +3764,7 @@ def admin_bulk_upload_tournament_teams():
                     results["teams"]["teams_updated"] += 1
                 else:
                     cur.execute(
-                        """
+                        """git
                         INSERT INTO tournament_teams
                             (name, home_venue_id, captain_name, captain_email, captain_phone, player_count)
                         VALUES (%s, %s, %s, %s, %s, %s)

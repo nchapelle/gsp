@@ -16,7 +16,13 @@
       return iso;
     }
   }
-
+  function calculateWeekEnding(dateStr) {
+  const date = new Date(dateStr);
+  const day = date.getDay();  // 0=Sun, 1=Mon, ..., 6=Sat
+  const daysToSunday = (7 - day) % 7 || 7;  // If already Sunday, next Sunday
+  date.setDate(date.getDate() + daysToSunday);
+  return date.toISOString().split('T')[0];  // YYYY-MM-DD
+  }
   // --- MODULE FOR: Admin Events List Page ---
   function initAdminList({ getEl }) {
     const q = getEl('q');
@@ -238,8 +244,10 @@
             `<option value="${tt.id}" ${tt.id === bestMatchId ? 'selected' : ''}>${tt.name}</option>`
         ).join('');
 
+        // --- TEMPLATE UPDATED HERE ---
+        // Added a 3-column grid and a new form-group for Player Count.
         return `
-        <div class="row row-2 tourney-score-row" style="padding: 8px 0; border-bottom: 1px solid var(--border);">
+        <div class="row row-3 tourney-score-row" style="padding: 8px 0; border-bottom: 1px solid var(--border);">
             <div class="form-group">
                 <label>Parsed Team: <strong>${p.team_name}</strong></label>
                 <select class="input link-team-select">
@@ -248,13 +256,19 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Tournament Points Awarded</label>
+                <label>Tournament Points</label>
                 <input type="number" class="input points-awarded" placeholder="e.g., 10" />
+            </div>
+            <div class="form-group">
+                <label>Player Count</label>
+                <input type="number" class="input num-players-awarded" placeholder="# Players" value="${p.num_players || ''}" />
             </div>
         </div>
         `;
+        // --- END OF UPDATE ---
       }).join('');
     }
+
     // --- End of Tournament Scoring Logic ---
     function participationRowTpl(r) {
       return `
@@ -280,7 +294,7 @@
         </div>
       </div>`;
     }
-    
+
     async function load() {
       GSP.clearStatus(statusEl);
       try {
@@ -354,6 +368,7 @@
     });
 
     getEl('savePartsBtn')?.addEventListener('click', async () => {
+      const statusEl = getEl('status');  // Assuming you have a status element
       GSP.clearStatus(statusEl);
       try {
         const rows = Array.from(getEl('partsContainer').querySelectorAll('.part-row')).map(div => ({
@@ -365,10 +380,12 @@
           is_tournament: div.querySelector('.part-tour')?.checked || false,
         })).filter(r => r.team_name);
 
-        await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: JSON.stringify({ teams: rows }) });
+        // Existing save to participation endpoint
+        await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: { teams: rows } });
         GSP.status(statusEl, 'success', 'Rankings saved.');
+
       } catch (err) {
-        GSP.status(statusEl, 'error', 'Save rankings failed: ' + err.message);
+        GSP.status(statusEl, 'error', 'Save failed: ' + err.message);
       }
     });
 
@@ -395,35 +412,55 @@
     });
 
     // Wire up the save button for tournament scores
-    const saveTourneyScoresBtn = getEl('saveTourneyScoresBtn');
-    if (saveTourneyScoresBtn) {
-      saveTourneyScoresBtn.addEventListener('click', async () => {
-        const container = getEl('tourneyScoresContainer');
+    getEl('saveTourneyScoresBtn')?.addEventListener('click', async () => {
         const tourneyStatusEl = getEl('tourneyScoreStatus');
         GSP.clearStatus(tourneyStatusEl);
-        
-        const assignments = Array.from(container.querySelectorAll('.tourney-score-row')).map(row => ({
-            tournament_team_id: parseInt(row.querySelector('.link-team-select').value, 10),
-            points: parseInt(row.querySelector('.points-awarded').value, 10),
-        })).filter(a => a.tournament_team_id && !isNaN(a.points));
-
-        if (assignments.length === 0) {
-            GSP.status(tourneyStatusEl, 'info', 'No valid tournament point entries to save.');
-            return;
-        }
 
         try {
-            GSP.status(tourneyStatusEl, 'info', 'Saving scores...');
-            const res = await GSP.j(`${API}/admin/events/${eid}/tournament-scores`, {
+            const scoreRows = Array.from(getEl('tourneyScoresContainer').querySelectorAll('.tourney-score-row'));
+            
+            const teamsPayload = scoreRows.map(row => {
+                const teamId = row.querySelector('.link-team-select')?.value;
+                const pointsInput = row.querySelector('.points-awarded');
+                const points = parseInt(pointsInput?.value, 10) || 0;
+                
+                // --- NEW CODE HERE ---
+                // Read the value from the new num_players input.
+                const numPlayersInput = row.querySelector('.num-players-awarded');
+                const numPlayers = numPlayersInput?.value ? parseInt(numPlayersInput.value, 10) : null;
+                // --- END OF NEW CODE ---
+
+                if (teamId) {
+                    return {
+                        team_id: parseInt(teamId, 10),
+                        points: points,
+                        num_players: numPlayers // Add the new value to the payload
+                    };
+                }
+                return null;
+            }).filter(Boolean);
+
+            if (teamsPayload.length === 0) {
+                GSP.status(tourneyStatusEl, 'info', 'No tournament teams were linked to save.');
+                return;
+            }
+
+            const payload = { teams: teamsPayload };
+            
+            console.log("SENDING PAYLOAD:", JSON.stringify(payload, null, 2));
+            
+            const data = await GSP.j(`${API}/admin/events/${eid}/tournament-scores`, {
                 method: 'PUT',
-                body: JSON.stringify(assignments)
+                body: JSON.stringify(payload)
             });
-            GSP.status(tourneyStatusEl, 'success', res.message || 'Scores saved.');
+
+            GSP.status(tourneyStatusEl, 'success', data.message || `Saved ${teamsPayload.length} scores.`);
+
         } catch (err) {
             GSP.status(tourneyStatusEl, 'error', `Save failed: ${err.message}`);
+            console.error("Error during save:", err);
         }
-      });
-    }
+    });
 
     getEl('parseBtn')?.addEventListener('click', async () => {
       GSP.clearStatus(statusEl);
