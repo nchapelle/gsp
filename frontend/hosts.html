@@ -64,6 +64,12 @@
             <div class="form-group">
               <label for="venueName">Venue:</label>
               <select id="venueName" name="venueName" class="input" required></select>
+              <button id="load-recent-photos-btn" style="display: none;">Generate Recent Venue Photos Zip</button>
+              <section id="recent-photos-section" style="display: none;">
+                  <h2>Recent Photos from This Venue</h2>
+                  <p>Zip of up to 20 photos from the last 5 validated events. Rate-limited to 5 requests per hour.</p>
+                  <div id="photo-zip-link"></div>
+                </section>
             </div>
 
             <div class="form-group">

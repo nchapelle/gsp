@@ -1452,6 +1452,69 @@ def get_venue_recent_photos(vid):
             pass
         return jsonify({"error": str(e)}), 500
 
+@app.get("/venues/<int:venue_id>/recent-photos-zip")
+def get_venue_recent_photos_zip(venue_id):
+
+    conn = getconn()
+    try:
+        # Get venue name for filename
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM venues WHERE id = %s;", (venue_id,))
+        venue_info = cur.fetchone()
+        if not venue_info:
+            return jsonify({"error": "Venue not found"}), 404
+
+        venue_name_str = (venue_info[0] or "UnknownVenue").replace(" ", "-")
+        safe_venue_name = re.sub(r'[^\w\-]', '', venue_name_str)
+        zip_filename = f"{safe_venue_name}-RecentPhotos.zip"
+
+        # Query recent events for the venue (last 5, sorted by date descending)
+        cur.execute("""
+            SELECT id FROM events
+            WHERE venue_id = %s
+            ORDER BY event_date DESC
+            LIMIT 
+        """, (venue_id,))
+        recent_events = cur.fetchall()
+
+        photos = []
+        for event_id in [e[0] for e in recent_events]:
+            cur.execute("SELECT photo_url FROM event_photos WHERE event_id = %s ORDER BY id;", (event_id,))
+            event_photos = cur.fetchall()
+            photos.extend([p[0] for p in event_photos])
+            if len(photos) >= 12:
+                break
+        photos = photos[:12]  # Cap at 12
+
+        if not photos:
+            return jsonify({"message": "No recent photos found for this venue."}), 200
+
+        # Zip photos to in-memory buffer
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for i, url in enumerate(photos):
+                try:
+                    filename = url.split('/')[-1] or f"photo_{i+1}.bin"
+                    filename = re.sub(r'[^\w\.-]', '_', filename)
+                    resp = httpx.get(url, timeout=30)
+                    resp.raise_for_status()
+                    zf.writestr(filename, resp.content)
+                except Exception as ex:
+                    logger.warning("Skip %s: %s", url, ex)
+
+        zip_buffer.seek(0)
+        return send_file(
+            zip_buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=zip_filename
+        )
+    except Exception as e:
+        logger.exception("get_venue_recent_photos_zip failed")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 # ------------------------------------------------------------------------------
 # Create Event
 # ------------------------------------------------------------------------------
@@ -4139,36 +4202,30 @@ def pub_venue_stats_secure(slug):
 
         cur = conn.cursor()
 
-        # Fetch all venues to find the one matching the slug and verify its key.
+        # Fetch the specific venue by slug and verify its key.
         cur.execute("SELECT id, name, default_day, default_time, access_key FROM venues;")
         venues_raw = cur.fetchall()
 
         venue_info = None
         for v_id, v_name, v_default_day, v_default_time, v_access_key in venues_raw:
-            # Re-create slug from venue name to match frontend's generation logic
-            venue_slug_from_db = re.sub(r'[^a-z0-9]+','-', (v_name or '').lower()).strip('-')
+            venue_slug_from_db = re.sub(r'[^a-z0-9]+', '-', (v_name or '').lower()).strip('-')
             if venue_slug_from_db == slug:
                 venue_info = {
-                    "id": v_id,
-                    "name": v_name,
-                    "default_day": v_default_day,
-                    "default_time": v_default_time,
-                    "access_key": v_access_key
+                    "id": v_id, "name": v_name, "default_day": v_default_day,
+                    "default_time": v_default_time, "access_key": v_access_key
                 }
                 break
 
         if not venue_info:
-            return jsonify({"error":"Venue not found or invalid URL."}), 404
+            return jsonify({"error": "Venue not found or invalid URL."}), 404
         
         if access_key != venue_info["access_key"]:
             return jsonify({"error": "Invalid access key for this venue."}), 403
 
-        # If authenticated, proceed to fetch the detailed stats
-        # NEW SQL: Use COALESCE to prioritize total_teams/total_players from 'events' table
-        # then fallback to aggregating from 'event_participation' if not directly available.
+        # SQL query to fetch detailed, GSP-only stats
         cur.execute("""
             SELECT
-                e.id, -- Added e.id for grouping
+                e.id,
                 e.event_date,
                 h.name AS host_name,
                 COALESCE(e.total_teams, COUNT(ep.id)) AS num_teams,
@@ -4176,15 +4233,18 @@ def pub_venue_stats_secure(slug):
             FROM events e
             LEFT JOIN hosts h ON e.host_id = h.id
             LEFT JOIN event_participation ep ON e.id = ep.event_id
-            WHERE e.venue_id = %s AND e.is_validated = TRUE -- Filter for validated events
-            GROUP BY e.id, e.event_date, h.name, e.total_teams, e.total_players -- Group by all non-aggregated columns
+            WHERE e.venue_id = %s
+              AND e.is_validated = TRUE
+              -- MODIFIED: Added show_type filter to select only GSP events
+              AND LOWER(e.show_type) = 'gsp'
+            GROUP BY e.id, e.event_date, h.name, e.total_teams, e.total_players
             ORDER BY e.event_date DESC;
         """, (venue_info["id"],))
         
         event_stats = []
         for r in cur.fetchall():
             event_stats.append({
-                "event_id": r[0], # Added event_id to output
+                "event_id": r[0],
                 "event_date": r[1].isoformat() if r[1] else None,
                 "host_name": r[2],
                 "num_teams": int(r[3]) if r[3] else 0,
@@ -4203,7 +4263,8 @@ def pub_venue_stats_secure(slug):
         logger.exception(f"pub_venue_stats_secure for slug {slug} failed")
         return jsonify({"error": "An internal server error occurred."}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 # ------------------------------------------------------------------------------
 # Entrypoint 
 # ------------------------------------------------------------------------------

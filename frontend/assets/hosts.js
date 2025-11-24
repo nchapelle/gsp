@@ -106,6 +106,10 @@
     var progressBarContainer = getEl("progressBarContainer");
     var progressBar = getEl("progressBar");
     var fileListUL = getEl("fileList");
+    var venueSelect = getEl('venue-select');
+    var loadPhotosBtn = getEl('load-recent-photos-btn');
+    var recentPhotosSection = getEl('recent-photos-section');
+    var photoZipLinkContainer = getEl('photo-zip-link');
 
     var allVenues = [];
     var allEvents = [];
@@ -225,6 +229,44 @@
       }
       renderRecent(filtered);
     }
+
+    loadPhotosBtn.addEventListener('click', async () => {
+        const venueId = venueSelect.value;
+        if (!venueId) {
+            GSP.status('error', 'Select a venue first.');
+            return;
+        }
+
+        GSP.status('info', 'Generating zip...');
+        try {
+            const response = await GSP.j(`/venue/${venueId}/recent_photos_zip`, { method: 'GET' });
+            const data = await response.json();
+
+            photoZipLinkContainer.innerHTML = '';
+
+            const zipLink = document.createElement('a');
+            zipLink.href = data.zip_url;
+            zipLink.textContent = 'Download Zip';
+            zipLink.download = `venue_${venueId}_recent_photos.zip`;
+            photoZipLinkContainer.appendChild(zipLink);
+
+            recentPhotosSection.style.display = 'block';
+            GSP.clearStatus();
+            GSP.status('success', 'Zip ready for download.');
+        } catch (error) {
+            GSP.status('error', `Error: ${error.message}`);
+        }
+    });
+    
+    // venueSelect.addEventListener('change', () => {
+    //     console.log('Venue changed to:', venueSelect.value);  // Debug
+    //     if (venueSelect.value) {
+    //         loadPhotosBtn.style.display = 'block';
+    //     } else {
+    //         loadPhotosBtn.style.display = 'none';
+    //         recentPhotosSection.style.display = 'none';
+    //     }
+    // });
 
     function initForm() {
       if (!hostSel || !venueSel || !eventDate) {

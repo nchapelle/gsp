@@ -24,6 +24,19 @@
     }
   }
 
+  // Safe formatter for YYYY-MM-DD without timezone shift
+  function formatLocalDateYMD(ymd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return ymd || '';
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(location.search);
     const slug = params.get('slug');
@@ -45,38 +58,50 @@
       venueNameTitle.textContent = 'Loading stats for ' + slug + '...';
       eventsListEl.innerHTML = '<li class="item">Fetching event data...</li>';
 
-      const response = await fetch(`${API}/pub/venues/${slug}/stats?key=${accessKey}`);
+      const response = await fetch(
+        `${API}/pub/venues/${encodeURIComponent(slug)}/stats?key=${encodeURIComponent(accessKey)}`,
+        { cache: 'no-store' }
+      );
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Failed to fetch stats: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch stats: ${response.status} ${response.statusText}`);
       }
       const data = await response.json();
 
       venueNameTitle.textContent = `${data.venue_name} Stats`;
       venueDetailsEl.innerHTML = `Weekly: ${data.default_day || 'N/A'} @ ${data.default_time || 'N/A'}`;
 
-      if (data.event_count === 0) {
+      if (!data.events || data.event_count === 0) {
         eventsListEl.innerHTML = '<li class="item">No validated events found for this venue.</li>';
       } else {
-        eventsListEl.innerHTML = data.events.map(event => `
-          <li class="item" style="flex-wrap: wrap;">
-            <div>
-                <strong>${new Date(event.event_date).toLocaleDateString()}</strong> - Host: ${event.host_name}
-            </div>
-            <div style="margin-top: 5px; width: 100%; display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-weak);">
-                <span>Teams: ${event.num_teams}</span>
-                <span>Players: ${event.num_players}</span>
-            </div>
-          </li>
-        `).join('');
+        const items = data.events.map((event) => {
+          const displayDate = formatLocalDateYMD(event.event_date);
+          return `
+            <li class="item" style="flex-wrap: wrap;">
+              <div>
+                <strong>${displayDate}</strong> - Host: ${event.host_name || 'N/A'}
+              </div>
+              <div style="margin-top: 5px; width: 100%; display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-weak);">
+                <span>Teams: ${event.num_teams ?? 0}</span>
+                <span>Players: ${event.num_players ?? 0}</span>
+              </div>
+            </li>
+          `;
+        });
+        eventsListEl.innerHTML = items.join('');
       }
-      setStatus(portalStatusElId, 'success', 'Stats loaded successfully.');
 
+      setStatus(portalStatusElId, 'success', 'Stats loaded successfully.');
     } catch (error) {
       venueNameTitle.textContent = 'Error Loading Stats';
-      setStatus(portalStatusElId, 'error', error.message || 'An unknown error occurred while loading venue statistics.');
-      eventsListEl.innerHTML = '<li class="item">Failed to load events. Please check the URL and access key.</li>';
-      console.error("Venue Owner Portal Error:", error);
+      setStatus(
+        portalStatusElId,
+        'error',
+        error.message || 'An unknown error occurred while loading venue statistics.'
+      );
+      eventsListEl.innerHTML =
+        '<li class="item">Failed to load events. Please check the URL and access key.</li>';
+      console.error('Venue Owner Portal Error:', error);
     }
   });
 })();
