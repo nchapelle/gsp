@@ -4,6 +4,7 @@ import re
 import json
 import gzip
 import logging
+import math
 import time
 import random
 import ssl
@@ -15,14 +16,19 @@ import difflib
 import zipfile
 from datetime import date, timedelta
 
-import requests as httpx
-import requests as rq
-import requests as _req
+import requests
+# Backwards-compatible aliases used elsewhere in the codebase / tests
+httpx = requests
+rq = requests
+_req = requests
 import pg8000
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, Response, stream_with_context, send_file, make_response
 from flask_cors import CORS
+import tempfile
+import threading
 from werkzeug.exceptions import RequestEntityTooLarge
+import concurrent.futures
 
 from google.cloud import storage
 
@@ -92,7 +98,8 @@ METADATA_HEADERS = {"Metadata-Flavor": "Google"}
 
 def get_runtime_sa_email() -> str | None:
     try:
-        r = _req.get(METADATA_EMAIL_URL, headers=METADATA_HEADERS, timeout=2)
+        # Use the requests library (not Flask's request proxy)
+        r = requests.get(METADATA_EMAIL_URL, headers=METADATA_HEADERS, timeout=2)
         if r.ok:
             email = (r.text or "").strip()
             if "@" in email and email.endswith(".iam.gserviceaccount.com"):
@@ -194,7 +201,7 @@ def fetch_with_retry(url, attempts=3, timeout=60):
     last = None
     for i in range(attempts):
         try:
-            r = httpx.get(url, timeout=timeout)
+            r = requests.get(url, timeout=timeout)
             if r.status_code in (429, 500, 502, 503, 504):
                 raise RuntimeError(f"retryable status {r.status_code}")
             r.raise_for_status()
@@ -952,12 +959,12 @@ def diag_versions():
     import google.cloud.storage as gcs
     import google.auth as gauth
     import google.api_core as gapicore
-    import requests as req
+    # use global `requests` import above
     return jsonify({
         "gcs": gcs.__version__,
         "google_auth": gauth.__version__,
         "google_api_core": gapicore.__version__,
-        "requests": req.__version__,
+        "requests": requests.__version__,
     })
 
 @app.get("/diag/bucket")
@@ -1454,67 +1461,181 @@ def get_venue_recent_photos(vid):
 
 @app.get("/venues/<int:venue_id>/recent-photos-zip")
 def get_venue_recent_photos_zip(venue_id):
-
+    """
+    Dual-mode endpoint:
+    1. No 'part' param -> Returns JSON metadata (list of available packs).
+    2. Has 'part' param -> Stream specific ZIP (12 photos).
+    """
     conn = getconn()
+    temp_zip_path = None
+    
     try:
-        # Get venue name for filename
         cur = conn.cursor()
+        
+        # 1. Fetch Venue Info
         cur.execute("SELECT name FROM venues WHERE id = %s;", (venue_id,))
         venue_info = cur.fetchone()
         if not venue_info:
             return jsonify({"error": "Venue not found"}), 404
+            
+        safe_venue_name = re.sub(r'[^\w\-]', '', (venue_info[0] or "Venue").replace(" ", "-"))
 
-        venue_name_str = (venue_info[0] or "UnknownVenue").replace(" ", "-")
-        safe_venue_name = re.sub(r'[^\w\-]', '', venue_name_str)
-        zip_filename = f"{safe_venue_name}-RecentPhotos.zip"
+        # 2. Config Limits
+        MAX_PHOTOS = 50 # Hard cap on how far back we look
+        PER_PAGE = 12   # Photos per zip pack
 
-        # Query recent events for the venue (last 5, sorted by date descending)
+        # 3. Get URLs
+        # We always fetch the list of URLs first to calculate packs
         cur.execute("""
-            SELECT id FROM events
-            WHERE venue_id = %s
-            ORDER BY event_date DESC
-            LIMIT 
-        """, (venue_id,))
-        recent_events = cur.fetchall()
-
-        photos = []
-        for event_id in [e[0] for e in recent_events]:
-            cur.execute("SELECT photo_url FROM event_photos WHERE event_id = %s ORDER BY id;", (event_id,))
-            event_photos = cur.fetchall()
-            photos.extend([p[0] for p in event_photos])
-            if len(photos) >= 12:
-                break
-        photos = photos[:12]  # Cap at 12
-
+            SELECT ep.photo_url
+            FROM events e
+            JOIN event_photos ep ON ep.event_id = e.id
+            WHERE e.venue_id = %s
+            ORDER BY e.event_date DESC, ep.id ASC
+            LIMIT %s
+        """, (venue_id, MAX_PHOTOS))
+        
+        photos = [r[0] for r in cur.fetchall()]
         if not photos:
-            return jsonify({"message": "No recent photos found for this venue."}), 200
+            return jsonify({"packs": [], "total": 0, "message": "No photos found."}), 200
 
-        # Zip photos to in-memory buffer
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for i, url in enumerate(photos):
-                try:
-                    filename = url.split('/')[-1] or f"photo_{i+1}.bin"
-                    filename = re.sub(r'[^\w\.-]', '_', filename)
-                    resp = httpx.get(url, timeout=30)
-                    resp.raise_for_status()
-                    zf.writestr(filename, resp.content)
-                except Exception as ex:
-                    logger.warning("Skip %s: %s", url, ex)
+        # --- MODE 1: METADATA (JSON) ---
+        # If no 'part' is requested, the frontend wants to know what packs exist.
+        part_arg = request.args.get('part')
+        
+        if part_arg is None:
+            total_photos = len(photos)
+            total_packs = math.ceil(total_photos / PER_PAGE)
+            packs = []
+            
+            for i in range(total_packs):
+                p_num = i + 1
+                start = i * PER_PAGE
+                end = start + PER_PAGE
+                slice_len = len(photos[start:end])
+                
+                # Preview images (first 3 of the pack) for the UI
+                previews = photos[start : start+3]
+                
+                packs.append({
+                    "part": p_num,
+                    "count": slice_len,
+                    "photos": previews, # Frontend uses this to show thumbnails
+                    "url": f"/venues/{venue_id}/recent-photos-zip?part={p_num}"
+                })
+            
+            return jsonify({
+                "total": total_photos,
+                "per_page": PER_PAGE,
+                "packs": packs
+            })
 
-        zip_buffer.seek(0)
-        return send_file(
-            zip_buffer,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name=zip_filename
-        )
+        # --- MODE 2: DOWNLOAD ZIP (BINARY STREAM) ---
+        # If 'part' IS requested, we download ONLY that slice.
+        
+        try:
+            part_idx = int(part_arg)
+            start = (max(1, part_idx) - 1) * PER_PAGE
+            chunk = photos[start : start + PER_PAGE]
+        except ValueError:
+            return jsonify({"error": "Invalid part number"}), 400
+
+        if not chunk:
+            return jsonify({"error": "No photos found for this part."}), 404
+
+        # Limits for the ZIP generation
+        MAX_TOTAL_ZIP_BYTES = int(os.getenv('MAX_ZIP_BYTES', 100 * 1024 * 1024))
+        MAX_FILE_BYTES = int(os.getenv('MAX_FILE_BYTES', 20 * 1024 * 1024))
+
+        # Create Temp File
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip_path = tf.name
+        tf.close()
+
+        # Threading checks
+        zip_lock = threading.Lock()
+        current_zip_size = 0
+        stop_flag = False
+        files_added = 0
+
+        def process_photo(url):
+            nonlocal current_zip_size, stop_flag, files_added
+            if stop_flag: return
+            
+            try:
+                # HEAD check
+                with requests.head(url, timeout=5) as head:
+                    if head.status_code < 400:
+                        clen = int(head.headers.get('Content-Length', 0))
+                        if clen > MAX_FILE_BYTES: return
+                        if current_zip_size + clen > MAX_TOTAL_ZIP_BYTES:
+                            stop_flag = True
+                            return
+
+                # Download
+                with requests.get(url, timeout=20) as r:
+                    r.raise_for_status()
+                    content = r.content
+
+                if len(content) > MAX_FILE_BYTES: return
+
+                with zip_lock:
+                    if stop_flag: return
+                    if current_zip_size + len(content) > MAX_TOTAL_ZIP_BYTES:
+                        stop_flag = True
+                        logger.warning(f"Hit ZIP limit ({MAX_TOTAL_ZIP_BYTES}). Stopping.")
+                        return
+
+                    with zipfile.ZipFile(temp_zip_path, 'a', zipfile.ZIP_DEFLATED) as zf:
+                        fname = url.split('/')[-1] or f"photo_{uuid4()}.jpg"
+                        fname = re.sub(r'[^\w\.-]', '_', fname)
+                        zf.writestr(fname, content)
+                        
+                    current_zip_size += len(content)
+                    files_added += 1
+
+            except Exception as e:
+                logger.warning(f"Error processing {url}: {e}")
+
+        # Execute Parallel Downloads (Only for the 12 items in 'chunk')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                pass 
+            futures = [executor.submit(process_photo, u) for u in chunk]
+            concurrent.futures.wait(futures)
+
+        if files_added == 0:
+            if os.path.exists(temp_zip_path): os.remove(temp_zip_path)
+            return jsonify({"error": "Could not download any images."}), 413
+
+        # Stream Response
+        def generate():
+            try:
+                with open(temp_zip_path, 'rb') as f:
+                    while True:
+                        data = f.read(64 * 1024)
+                        if not data: break
+                        yield data
+            finally:
+                if os.path.exists(temp_zip_path): os.remove(temp_zip_path)
+
+        dl_name = f"{safe_venue_name}-RecentPhotos-Part{part_idx}.zip"
+        headers = {
+            'Content-Disposition': f'attachment; filename="{dl_name}"',
+            'Access-Control-Allow-Origin': request.headers.get('Origin', '*')
+        }
+
+        return Response(stream_with_context(generate()), mimetype='application/zip', headers=headers)
+
     except Exception as e:
+        if temp_zip_path and os.path.exists(temp_zip_path):
+            os.remove(temp_zip_path)
         logger.exception("get_venue_recent_photos_zip failed")
         return jsonify({"error": str(e)}), 500
     finally:
         if conn:
             conn.close()
+    
 # ------------------------------------------------------------------------------
 # Create Event
 # ------------------------------------------------------------------------------
@@ -1622,7 +1743,7 @@ def create_event():
 
         try:
             if pdf_url:
-                rq.post(f"https://api.gspevents.com/events/{event_id}/parse-pdf", timeout=2)
+                requests.post(f"https://api.gspevents.com/events/{event_id}/parse-pdf", timeout=2)
         except Exception as te:
             logger.warning("Parse trigger failed for event %s: %s", event_id, te)
 
@@ -2215,65 +2336,11 @@ def update_ai_text(eid):
     finally:
         conn.close()
 
-@app.get("/events/<int:eid>/photos")
-def get_event_photos_list(eid):
-    conn = getconn()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT photo_url FROM event_photos WHERE event_id=%s ORDER BY id;", (eid,))
-        photos = [r[0] for r in cur.fetchall()]
-        return jsonify(photos)
-    finally:
-        conn.close()
-
-@app.get("/events/<int:eid>/download-photos")
-def download_event_photos_zip(eid):
-    conn = getconn()
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT e.event_date, v.name
-            FROM events e
-            JOIN venues v ON e.venue_id = v.id
-            WHERE e.id = %s;
-        """, (eid,))
-        event_info = cur.fetchone()
-        
-        if not event_info:
-            conn.close()
-            return jsonify({"error": "Event not found"}), 404
-
-        event_date_str = event_info[0].isoformat() if event_info[0] else "UnknownDate"
-        venue_name_str = (event_info[1] or "UnknownVenue").replace(" ", "-")
-        safe_venue_name = re.sub(r'[^\w\-]', '', venue_name_str)
-        zip_filename = f"{safe_venue_name}-{event_date_str}.zip"
-
-        cur.execute("SELECT photo_url FROM event_photos WHERE event_id=%s ORDER BY id;", (eid,))
-        photo_urls = [r[0] for r in cur.fetchall()]
-        if not photo_urls:
-            cur.close()
-            conn.close()
-            return jsonify({"message": "No photos found for this event."}), 200
-
-        import zipfile
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for i, url in enumerate(photo_urls):
-                try:
-                    filename = url.split('/')[-1] or f"photo_{i+1}.bin"
-                    filename = re.sub(r'[^\w\.-]', '_', filename)
-                    resp = httpx.get(url, timeout=30)
-                    resp.raise_for_status()
-                    zf.writestr(filename, resp.content)
-                except Exception as ex:
-                    logger.warning("Skip %s: %s", url, ex)
-
-        zip_buffer.seek(0)
-        cur.close()
-        conn.close()
-        return send_file(
-            zip_buffer,
-            mimetype="application/zip",
+# NOTE: /venues/<id>/recent-photos-zips removed intentionally — the
+# singular endpoint /venues/<id>/recent-photos-zip (without a `part`
+# query param) returns the packs metadata while /recent-photos-zip?part=
+# returns the actual zip. Keeping one canonical endpoint here reduces
+# surface area and chance of abuse.
             as_attachment=True,
             download_name=zip_filename, # Use the new dynamic filename
         )
@@ -2367,7 +2434,7 @@ def migrate_all_drive_pdfs():
         for eid, url in rows:
             results["attempted"] += 1
             try:
-                r = rq.post("https://api.gspevents.com/admin/migrate-pdf", json={"event_id": eid}, timeout=60)
+                r = requests.post("https://api.gspevents.com/admin/migrate-pdf", json={"event_id": eid}, timeout=60)
                 if r.ok and r.json().get("status") == "ok":
                     results["migrated"] += 1
                 else:
@@ -3512,7 +3579,7 @@ def parse_all_events():
         for eid in ids:
             results["attempted"] += 1
             try:
-                r = rq.post(f"https://api.gspevents.com/events/{eid}/parse-pdf", timeout=30)
+                r = requests.post(f"https://api.gspevents.com/events/{eid}/parse-pdf", timeout=30)
                 if r.ok:
                     js = r.json()
                     if js.get("status") == "success":

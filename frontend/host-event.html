@@ -62,13 +62,17 @@
           <form id="addPhotosForm">
             <div class="form-group">
               <label for="addPhotosInput">Select Photos (Max 50):</label>
-              <input
-                type="file"
-                id="addPhotosInput"
-                multiple
-                accept="image/*,.heic,.heif"
-                class="input"
-              />
+              <div class="file-field">
+                <input
+                  type="file"
+                  id="addPhotosInput"
+                  multiple
+                  accept="image/*,.heic,.heif"
+                  class="file-input-hidden"
+                />
+                <label for="addPhotosInput" class="file-btn btn btn-primary">Choose Photos</label>
+                <span class="file-name" id="addPhotosInputName">No files selected</span>
+              </div>
               <small class="small-text">
                 Choose more photos to add to this event.
               </small>

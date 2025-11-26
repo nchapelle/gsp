@@ -106,7 +106,6 @@
     var progressBarContainer = getEl("progressBarContainer");
     var progressBar = getEl("progressBar");
     var fileListUL = getEl("fileList");
-    var venueSelect = getEl('venue-select');
     var loadPhotosBtn = getEl('load-recent-photos-btn');
     var recentPhotosSection = getEl('recent-photos-section');
     var photoZipLinkContainer = getEl('photo-zip-link');
@@ -230,43 +229,192 @@
       renderRecent(filtered);
     }
 
-    loadPhotosBtn.addEventListener('click', async () => {
-        const venueId = venueSelect.value;
-        if (!venueId) {
-            GSP.status('error', 'Select a venue first.');
-            return;
+    // show/hide the generate button when a venue is selected
+    function updateLoadPhotosBtnVisibility() {
+      if (!loadPhotosBtn || !venueSel) return;
+      if (venueSel.value) loadPhotosBtn.style.display = 'inline-flex';
+      else {
+        loadPhotosBtn.style.display = 'none';
+        if (recentPhotosSection) recentPhotosSection.style.display = 'none';
+        if (photoZipLinkContainer) photoZipLinkContainer.innerHTML = '';
+        const statusEl = getEl('photoZipStatus'); if (statusEl) GSP.clearStatus(statusEl);
+      }
+    }
+
+    // ensure button visibility is correct at load
+    updateLoadPhotosBtnVisibility();
+
+    // download a zip pack by fetching the response as a blob and triggering a programmatic download
+    async function downloadZipPack(urlPath, venueId, part, btnEl, statusEl) {
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Downloading…'; }
+      if (statusEl) { statusEl.textContent = ''; }
+      try {
+      const fullUrl = (String(urlPath || '').startsWith('http') ? urlPath : CONFIG.API_BASE_URL + urlPath);
+      const headers = {};
+      if (CONFIG.TOKEN) headers['X-GSP-Token'] = CONFIG.TOKEN;
+      const res = await fetch(fullUrl, { method: 'GET', headers: headers });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => res.statusText || 'Failed');
+        throw new Error(txt || 'Network error');
+      }
+      const blob = await res.blob();
+      const filename = `venue_${venueId}_photos_part${part}.zip`;
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+      if (statusEl) statusEl.textContent = 'Downloaded';
+      return true;
+      } catch (err) {
+      if (statusEl) statusEl.textContent = 'Error: ' + (err.message || 'download failed');
+      console.error('downloadZipPack error', err);
+      return Promise.reject(err);
+      } finally {
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Download'; }
+      }
+    }
+
+    // main handler: request pack list and open modal with per-pack download buttons
+    loadPhotosBtn.addEventListener('click', async (ev) => {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      const venueId = venueSel.value;
+      if (!venueId) {
+        status(getEl('photoZipStatus'), 'error', 'Select a venue first.');
+        return;
+      }
+
+      const statusEl = getEl('photoZipStatus');
+      status(statusEl, 'info', 'Generating zip packs...');
+
+      // Make modal visible immediately so users get immediate feedback
+      // while we fetch pack data (prevents "nothing happened" UX).
+      const modal = getEl('photoZipModal');
+      const packsContainer = getEl('photoZipModalPacks');
+      const modalStatus = getEl('photoZipModalStatus');
+      const downloadAllBtn = getEl('downloadAllPacksBtn');
+      if (packsContainer) packsContainer.innerHTML = '';
+      if (modal) modal.style.display = 'flex';
+      if (recentPhotosSection) recentPhotosSection.style.display = 'block';
+      if (modalStatus) status(modalStatus, 'info', 'Loading zip packs...');
+
+      try {
+        const res = await j(CONFIG.API_BASE_URL + `/venues/${venueId}/recent-photos-zip`);
+        if (!res || !res.packs || !res.packs.length) {
+          // Show explicit message in the modal as well so the user sees
+          // something even if the top-level status is hidden.
+          status(statusEl, 'error', 'No recent photos available for this venue.');
+          if (modalStatus) status(modalStatus, 'error', 'No recent photos available for this venue.');
+          return;
         }
 
-        GSP.status('info', 'Generating zip...');
-        try {
-            const response = await GSP.j(`/venue/${venueId}/recent_photos_zip`, { method: 'GET' });
-            const data = await response.json();
+        // populate the modal
+        const modal = getEl('photoZipModal');
+        const packsContainer = getEl('photoZipModalPacks');
+        const modalStatus = getEl('photoZipModalStatus');
+        const downloadAllBtn = getEl('downloadAllPacksBtn');
+        packsContainer.innerHTML = '';
 
-            photoZipLinkContainer.innerHTML = '';
+        var per = res.per_page || 12;
+        var total = res.total || 0;
 
-            const zipLink = document.createElement('a');
-            zipLink.href = data.zip_url;
-            zipLink.textContent = 'Download Zip';
-            zipLink.download = `venue_${venueId}_recent_photos.zip`;
-            photoZipLinkContainer.appendChild(zipLink);
+        // Only show the most recent 4 packs (48 photos) to avoid sending
+        // users extremely large downloads and to keep the UI snappy.
+        var MAX_PACKS_TO_SHOW = 4;
+        var packsToShow = res.packs.slice(0, Math.min(res.packs.length, MAX_PACKS_TO_SHOW));
 
-            recentPhotosSection.style.display = 'block';
-            GSP.clearStatus();
-            GSP.status('success', 'Zip ready for download.');
-        } catch (error) {
-            GSP.status('error', `Error: ${error.message}`);
+        if (res.packs.length > packsToShow.length && modalStatus) {
+          status(modalStatus, 'info', `Showing most recent ${packsToShow.length * (res.per_page || 12)} photos. Use API or server tools to fetch older photos.`);
         }
+
+        packsToShow.forEach(function(p) {
+          var part = p.part || 1;
+          var start = (part - 1) * per + 1;
+          var end = Math.min(total, part * per);
+
+          var row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.justifyContent = 'space-between';
+          row.style.alignItems = 'center';
+          row.style.gap = '10px';
+
+          var title = document.createElement('div');
+          title.textContent = `Photos ${start}-${end}`;
+
+          var controls = document.createElement('div');
+
+          // show small thumbnails for the pack (if server returned photo urls)
+          if (p.photos && p.photos.length) {
+            var thumbs = document.createElement('div');
+            thumbs.style.display = 'flex';
+            thumbs.style.gap = '6px';
+            thumbs.style.alignItems = 'center';
+            thumbs.style.marginRight = '12px';
+            // limit preview count to 6 thumbnails to avoid overloading UI
+            var preview = p.photos.slice(0, 6);
+            preview.forEach(function (url) {
+              var img = document.createElement('img');
+              img.src = url;
+              img.alt = 'photo';
+              img.loading = 'lazy';
+              img.style.width = '56px';
+              img.style.height = '56px';
+              img.style.objectFit = 'cover';
+              img.style.borderRadius = '6px';
+              img.style.border = '1px solid rgba(255,255,255,0.06)';
+              thumbs.appendChild(img);
+            });
+            // controls isn't appended yet, so don't use insertBefore with it
+            // (insertBefore requires the reference node to already be a child).
+            // Append thumbnails first, then title and controls below.
+            row.appendChild(thumbs);
+          }
+
+          var packStatus = document.createElement('span');
+          packStatus.style.marginRight = '8px';
+          // expose a named class so the "Download All" flow can update
+          // the per-pack status element when running sequential downloads
+          packStatus.className = 'small-text pack-status-' + part;
+
+          var dl = document.createElement('button');
+          dl.className = 'btn btn-primary';
+          dl.textContent = 'Download';
+          dl.type = 'button';
+
+          // Use JS fetch + blob -> createObjectURL to force download in-page
+          dl.addEventListener('click', async function (ev) {
+            ev && ev.preventDefault && ev.preventDefault();
+            if (packStatus) packStatus.textContent = 'Downloading...';
+            try {
+              var downloadPath = p && p.url ? p.url : `/venues/${venueId}/recent-photos-zip?part=${part}`;
+              await downloadZipPack(downloadPath, venueId, part, dl, packStatus);
+            } catch (er) {
+              console.error('pack download failed', er);
+            }
+          });
+
+          controls.appendChild(packStatus);
+          controls.appendChild(dl);
+          row.appendChild(title);
+          row.appendChild(controls);
+          packsContainer.appendChild(row);
+        });
+
+
+
+        // Modal is already opened earlier; clear any loading status
+        if (modalStatus) GSP.clearStatus(modalStatus);
+        status(statusEl, 'success', 'Zips ready — choose a pack to download.');
+      } catch (error) {
+        // Surface the error in both the small status and in the modal
+        status(statusEl, 'error', `Error: ${error.message}`);
+        const modalStatusEl = getEl('photoZipModalStatus');
+        if (modalStatusEl) status(modalStatusEl, 'error', `Error: ${error.message}`);
+      }
     });
-    
-    // venueSelect.addEventListener('change', () => {
-    //     console.log('Venue changed to:', venueSelect.value);  // Debug
-    //     if (venueSelect.value) {
-    //         loadPhotosBtn.style.display = 'block';
-    //     } else {
-    //         loadPhotosBtn.style.display = 'none';
-    //         recentPhotosSection.style.display = 'none';
-    //     }
-    // });
 
     function initForm() {
       if (!hostSel || !venueSel || !eventDate) {
@@ -284,6 +432,7 @@
           var hosts = res[0] || [];
           var venues = res[1] || [];
           var events = res[2] || [];
+      
           var adjData = res[3] || { adjectives: [], random: null };
 
           var priorHost = hostSel && hostSel.value ? String(hostSel.value) : "";
@@ -318,7 +467,7 @@
     }
 
     if (hostSel) hostSel.addEventListener("change", function () { applyRecentFilter("host change"); });
-    if (venueSel) venueSel.addEventListener("change", function () { applySmartDate("venue change"); applyRecentFilter("venue change"); });
+    if (venueSel) venueSel.addEventListener("change", function () { updateLoadPhotosBtnVisibility(); applySmartDate("venue change"); applyRecentFilter("venue change"); });
 
     if (submitButton) {
       submitButton.addEventListener("click", async function (evt) {
@@ -424,6 +573,23 @@
       });
     }
 
-    initForm();
+      // modal close behaviour (wired here so DOM refs are available)
+      const photoZipModal = getEl('photoZipModal');
+      const closeModalBtn = getEl('closePhotoZipModalBtn');
+      const closeModalFooterBtn = getEl('closePhotoZipModalFooterBtn');
+      const photoZipModalPacks = getEl('photoZipModalPacks');
+      const photoZipModalStatus = getEl('photoZipModalStatus');
+
+      function closePhotoModal() {
+        if (photoZipModal) photoZipModal.style.display = 'none';
+        if (photoZipModalPacks) photoZipModalPacks.innerHTML = '';
+        if (photoZipModalStatus) GSP.clearStatus(photoZipModalStatus);
+      }
+
+      // Attach the close handler only to an enabled control.
+      if (closeModalBtn && !closeModalBtn.disabled) closeModalBtn.addEventListener('click', closePhotoModal);
+      if (closeModalFooterBtn) closeModalFooterBtn.addEventListener('click', closePhotoModal);
+
+      initForm();
   });
 })();

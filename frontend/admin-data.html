@@ -241,7 +241,11 @@
         </div>
         <div class="form-group">
           <label for="bulkFile">CSV File</label>
-          <input id="bulkFile" type="file" accept=".csv,text/csv" class="input" />
+          <div class="file-field">
+            <input id="bulkFile" type="file" accept=".csv,text/csv" class="file-input-hidden" />
+            <label for="bulkFile" class="file-btn btn btn-primary">Choose CSV</label>
+            <span class="file-name" id="bulkFileName">No file selected</span>
+          </div>
           <div class="help">Drag a CSV with headers; comments may be quoted.</div>
         </div>
       </div>

@@ -423,9 +423,18 @@
     const stat = getEl("bulkStatus");
     const sel = getEl("bulkVenue");
     const file = getEl("bulkFile");
+    const fileNameEl = getEl('bulkFileName');
     const btn = getEl("bulkUploadBtn");
     const tmpl = getEl("bulkTemplateBtn");
     if (!sel || !btn) return;
+
+    if (file) {
+      file.addEventListener('change', function () {
+        if (!fileNameEl) return;
+        if (!this.files || !this.files.length) fileNameEl.textContent = 'No file selected';
+        else fileNameEl.textContent = this.files[0].name || '1 file selected';
+      });
+    }
 
     if (tmpl) {
       tmpl.addEventListener("click", () => {

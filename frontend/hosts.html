@@ -64,11 +64,30 @@
             <div class="form-group">
               <label for="venueName">Venue:</label>
               <select id="venueName" name="venueName" class="input" required></select>
-              <button id="load-recent-photos-btn" style="display: none;">Generate Recent Venue Photos Zip</button>
-              <section id="recent-photos-section" style="display: none;">
+              <button id="load-recent-photos-btn" type="button" class="btn btn-primary" style="display: none;">Recent Photos Zip</button>
+                <section id="recent-photos-section" style="display: none;">
                   <h2>Recent Photos from This Venue</h2>
-                  <p>Zip of up to 20 photos from the last 5 validated events. Rate-limited to 5 requests per hour.</p>
+                  <p>Download recent photos for this venue. Photos are packaged into zip files in packets of up to 12 photos each.</p>
+                  <div id="photoZipStatus" class="status" style="display:none;"></div>
                   <div id="photo-zip-link"></div>
+                  <!-- Modal for Recent Photos Zip downloads -->
+                  <div id="photoZipModal" class="modal-backdrop" style="display:none;">
+                    <div class="modal-content card" style="max-width:720px; width:90%;">
+                      <div class="modal-header">
+                        <h2 class="h2">Recent Photos Zips</h2>
+                        <!-- Top X intentionally disabled to prevent accidental form submits altering the URL -->
+                        <button id="closePhotoZipModalBtn" class="btn btn-ghost" aria-label="Close" title="Close" type="button" disabled style="font-size:20px; padding:6px; border-radius:8px; line-height:1; opacity:0.5; cursor:not-allowed;">&times;</button>
+                      </div>
+                      <div class="modal-body" id="photoZipModalBody">
+                        <div id="photoZipModalStatus" class="status" style="display:none;"></div>
+                        <div id="photoZipModalPacks" style="display:grid; gap:8px; margin-top:12px;"></div>
+                      </div>
+                      <!-- Footer: keep a visible Close button to allow users to dismiss the modal -->
+                      <div class="modal-footer" style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button id="closePhotoZipModalFooterBtn" class="btn btn-ghost" type="button">Close</button>
+                      </div>
+                    </div>
+                  </div>
                 </section>
             </div>
 
@@ -88,26 +107,34 @@
 
             <div class="form-group">
               <label for="pdfRecap">Upload PDF Recap (Max 1):</label>
-              <input
-                type="file"
-                id="pdfRecap"
-                name="pdfRecap"
-                accept=".pdf"
-                class="input"
-              />
+              <div class="file-field">
+                <input
+                  type="file"
+                  id="pdfRecap"
+                  name="pdfRecap"
+                  accept=".pdf"
+                  class="file-input-hidden"
+                />
+                <label for="pdfRecap" class="file-btn btn btn-primary">Choose PDF</label>
+                <span class="file-name" id="pdfRecapName">No file selected</span>
+              </div>
               <small class="small-text">Upload the official game recap PDF.</small>
             </div>
 
             <div class="form-group">
               <label for="photos">Upload Photos (Max 50):</label>
-              <input
-                type="file"
-                id="photos"
-                name="photos"
-                multiple
-                accept="image/*,.heic,.heif"
-                class="input"
-              />
+              <div class="file-field">
+                <input
+                  type="file"
+                  id="photos"
+                  name="photos"
+                  multiple
+                  accept="image/*,.heic,.heif"
+                  class="file-input-hidden"
+                />
+                <label for="photos" class="file-btn btn btn-primary">Choose Photos</label>
+                <span class="file-name" id="photosName">No files selected</span>
+              </div>
               <small class="small-text">
                 Drag and drop or click to select multiple photos.
               </small>

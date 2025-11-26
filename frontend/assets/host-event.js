@@ -192,6 +192,18 @@
       progressBarContainer: getEl("progressBarContainer"),
     };
 
+    // Inline filename feedback for the styled file control
+    if (els.input) {
+      var nameEl = document.getElementById('addPhotosInputName');
+      els.input.addEventListener('change', function () {
+        if (!nameEl) return;
+        var f = this.files;
+        if (!f || !f.length) nameEl.textContent = 'No files selected';
+        else if (f.length === 1) nameEl.textContent = f[0].name || '1 file selected';
+        else nameEl.textContent = f.length + ' files selected';
+      });
+    }
+
     loadEvent(eventId, els).catch(function () {});
 
     if (els.form) {
