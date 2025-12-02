@@ -15,6 +15,7 @@
 
 
       { "source": "/admin", "destination": "/admin.html" },
+      { "source": "/admin-data", "destination": "/admin-data.html" },
       { "source": "/admin/event", "destination": "/admin-event.html" },
 
       { "source": "/admin/data", "destination": "/admin-data.html" },

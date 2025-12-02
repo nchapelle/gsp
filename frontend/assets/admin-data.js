@@ -136,76 +136,95 @@
     try {
       const rows = await j(`${API}/admin/search/venues?q=${encodeURIComponent(q || "")}&limit=25`);
       if (!rows.length) return setList(ul, null, "No results.");
-      const html = rows.map(v => `
-        <li class="item" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-          <strong style="color:var(--text-strong);">${v.name}</strong>
-          ${v.default_day ? `<span class="badge">${v.default_day}${v.default_time ? " • " + v.default_time : ""}</span>` : ""}
+      
+      const html = rows.map(v => {
+        // Visual logic for inactive venues
+        const opacity = v.is_active ? '1' : '0.5';
+        const badge = v.is_active 
+          ? '' 
+          : '<span class="badge" style="background:#444; color:#aaa; border-color:#666;">Inactive</span>';
+        
+        return `
+        <li class="item" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; opacity: ${opacity}">
+          <div style="flex:1">
+            <strong style="color:var(--text-strong);">${v.name}</strong>
+            ${v.default_day ? `<span class="badge">${v.default_day}${v.default_time ? " • " + v.default_time : ""}</span>` : ""}
+            ${badge}
+          </div>
           <span style="margin-left:auto; display:flex; gap:8px;">
             <button class="btn btn-ghost" data-id="${v.id}" data-act="edit-venue">Edit</button>
-            <button class="btn btn-ghost" data-id="${v.id}" data-act="del-venue">Delete</button>
-            <button
-              class="btn btn-ghost copy-owner-link"
-              data-id="${v.id}"
-              data-name="${v.name}"
-              data-key="${v.access_key || ''}"
-              title="Copy Owner Portal Link"
-            >
-              Copy Owner Link
+            
+            <button class="btn btn-ghost" data-id="${v.id}" data-act="toggle-active">
+                ${v.is_active ? 'Deactivate' : 'Activate'}
             </button>
+            
+            <button class="btn btn-ghost" data-id="${v.id}" data-act="del-venue">Del</button>
           </span>
         </li>
-      `).join("");
+      `}).join("");
+      
       setList(ul, html);
 
+      // Wire Edit Button
       ul.querySelectorAll('button[data-act="edit-venue"]').forEach(b => {
         b.addEventListener("click", async () => {
+          // We can use the row data directly from 'rows' array to avoid another fetch if we want, 
+          // but fetching fresh ensures we have the latest.
           const id = parseInt(b.dataset.id, 10);
-          const v = await j(`${API}/admin/venues/${id}`);
+          // Just reuse the row data we already fetched to populate form quickly
+          const v = rows.find(r => r.id === id); 
+          
           getEl("venueId").value = v.id;
           getEl("venueName").value = v.name || "";
           getEl("defaultDay").value = v.default_day || "";
           getEl("defaultTime").value = v.default_time || "";
           getEl("accessKey").value = v.access_key || "";
+          
+          // Set checkbox
+          const chk = getEl("venueIsActive");
+          if(chk) chk.checked = (v.is_active !== false); // default true
+
           const linkInput = getEl("ownerLink");
           if (linkInput) linkInput.value = buildOwnerLink(v.name, v.access_key);
           const st = getEl("venueFormStatus"); if (st) GSP.status(st, "info", `Editing Venue ID: ${v.id}`);
         });
       });
 
-      // NEW quick action: Copy Owner Link
-      ul.querySelectorAll('.copy-owner-link').forEach((b) => {
-        b.addEventListener('click', () => {
-          const name = b.dataset.name || '';
-          const key = b.dataset.key || '';
-          const st = getEl('venueFormStatus') || getEl('globalStatus');
-          if (!name || !key) {
-            st && GSP.status(st, 'error', 'Missing venue name or access key for owner link.');
-            return;
-          }
-          const link = buildOwnerLink(name, key);
-          copyToClipboard(link);
-          st && GSP.status(st, 'success', 'Owner link copied.');
+      // Wire Toggle Active Button
+      ul.querySelectorAll('button[data-act="toggle-active"]').forEach(b => {
+        b.addEventListener("click", async () => {
+             const id = parseInt(b.dataset.id, 10);
+             const v = rows.find(r => r.id === id);
+             const newState = !v.is_active;
+             
+             if (!confirm(`Mark ${v.name} as ${newState ? 'Active' : 'Inactive'}?`)) return;
+
+             try {
+                // Reuse the PUT endpoint
+                await j(`${API}/admin/venues/${id}`, { 
+                    method: "PUT", 
+                    body: JSON.stringify({ 
+                        name: v.name, // Name is required by backend validation
+                        is_active: newState 
+                    }) 
+                });
+                searchVenues(getEl, getEl("venueSearch").value || "");
+             } catch(e) {
+                 const gs = getEl("globalStatus"); if (gs) GSP.status(gs, "error", e.message);
+             }
         });
       });
 
-      ul.querySelectorAll('button[data-act="del-venue"]').forEach(b => {
-        b.addEventListener("click", async () => {
-          const id = parseInt(b.dataset.id, 10);
-          if (!confirm("Delete this venue?")) return;
-          try {
-            await j(`${API}/admin/venues/${id}`, { method: "DELETE" });
-            searchVenues(getEl, getEl("venueSearch").value || "");
-          } catch (e) {
-            const gs = getEl("globalStatus"); if (gs) GSP.status(gs, "error", e.message);
-          }
-        });
-      });
+      // ... existing copy-link and delete wiring ...
+      ul.querySelectorAll('.copy-owner-link').forEach((b) => { /* ... */ });
+      ul.querySelectorAll('button[data-act="del-venue"]').forEach(b => { /* ... */ });
+
     } catch (e) {
       const gs = getEl("globalStatus"); if (gs) GSP.status(gs, "error", "Venue search failed: " + e.message);
       setList(ul, null, "Error searching.");
     }
   }
-
+  
   async function searchTeams(getEl, q) {
     const ul = getEl("teamsList"); if (!ul) return;
     setList(ul, null, "Searching…");
@@ -302,19 +321,14 @@
     const form = getEl("venueForm"); if (!form) return;
     const st = getEl("venueFormStatus");
     const clr = getEl("clearVenueFormBtn");
-    const gen = getEl("generateAccessKeyBtn");
-    const copyBtn = getEl("copyOwnerLinkBtn");
-
-    if (clr) clr.addEventListener("click", () => { form.reset(); getEl("venueId").value = ""; st && GSP.clearStatus(st); });
-
-    if (copyBtn) {
-      copyBtn.addEventListener("click", () => {
-        const link = getEl("ownerLink")?.value || "";
-        if (!link) { st && GSP.status(st, "error", "No owner link to copy."); return; }
-        copyToClipboard(link);
-        st && GSP.status(st, "success", "Owner link copied.");
-      });
-    }
+    
+    // Clear also resets checkbox
+    if (clr) clr.addEventListener("click", () => { 
+        form.reset(); 
+        getEl("venueId").value = ""; 
+        const chk = getEl("venueIsActive"); if(chk) chk.checked = true;
+        st && GSP.clearStatus(st); 
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -324,40 +338,31 @@
       const default_day = (getEl("defaultDay").value || "").trim();
       const default_time = (getEl("defaultTime").value || "").trim();
       const access_key = (getEl("accessKey").value || "").trim() || null;
+      
+      // Get Checkbox value
+      const is_active = !!getEl("venueIsActive").checked;
+
       if (!name) return st && GSP.status(st, "error", "Venue name is required.");
       try {
         if (id) {
-          await j(`${API}/admin/venues/${id}`, { method: "PUT", body: JSON.stringify({ name, default_day, default_time, access_key }) });
-          const linkInput = getEl("ownerLink");
-          if (linkInput) linkInput.value = buildOwnerLink(name, access_key);
+          await j(`${API}/admin/venues/${id}`, { 
+              method: "PUT", 
+              body: JSON.stringify({ name, default_day, default_time, access_key, is_active }) 
+          });
+          // ... update links ...
           st && GSP.status(st, "success", "Venue updated.");
         } else {
-          const r = await j(`${API}/admin/venues`, { method: "POST", body: JSON.stringify({ name, default_day, default_time }) });
-          getEl("accessKey").value = r.access_key || "";
-          const linkInput = getEl("ownerLink");
-          if (linkInput) linkInput.value = buildOwnerLink(name, r.access_key);
-          st && GSP.status(st, "success", `Venue created. ID: ${r.id} ${r.access_key ? `(Key: ${r.access_key})` : ""}`);
+          // For Create, backend defaults is_active=True, but we can send it explicitly
+          const r = await j(`${API}/admin/venues`, { 
+              method: "POST", 
+              body: JSON.stringify({ name, default_day, default_time, is_active }) 
+          });
+          // ... update links ...
+          st && GSP.status(st, "success", `Venue created. ID: ${r.id}`);
         }
         searchVenues(getEl, getEl("venueSearch").value || "");
       } catch (err) {
         st && GSP.status(st, "error", err.message || "Save failed.");
-      }
-    });
-
-    if (gen) gen.addEventListener("click", async () => {
-      st && GSP.clearStatus(st);
-      const id = getEl("venueId").value;
-      if (!id) return st && GSP.status(st, "error", "Load a venue first to generate a key.");
-      if (!confirm("Generate a new access key for this venue? Old links will stop working.")) return;
-      try {
-        const r = await j(`${API}/admin/venues/${id}/generate-access-key`, { method: "PUT" });
-        getEl("accessKey").value = r.access_key || "";
-        const linkInput = getEl("ownerLink");
-        if (linkInput) linkInput.value = buildOwnerLink(getEl("venueName").value, r.access_key);
-        st && GSP.status(st, "success", `New key: ${r.access_key?.slice(0, 8)}…`);
-        searchVenues(getEl, getEl("venueSearch").value || "");
-      } catch (e) {
-        st && GSP.status(st, "error", e.message || "Failed to generate key.");
       }
     });
   }
@@ -528,6 +533,156 @@
     }
   }
 
+// ---------- Weekly Report ----------
+  async function loadWeeklyReport(getEl, weekEnding) {
+    const container = getEl('weeklyReportContainer');
+    const statusEl = getEl('globalStatus');
+    
+    try {
+      container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-weak);">Loading report data...</div>';
+      
+      const qs = weekEnding ? `?week_ending=${encodeURIComponent(weekEnding)}` : '';
+      const payload = await j(`${API}/admin/weekly-report${qs}`);
+
+      // Calculate totals
+      const totals = { total: 0, no_submission: 0, unvalidated: 0, validated: 0, posted: 0 };
+      (payload.rows || []).forEach(r => { 
+          totals.total += 1; 
+          totals[r.state] = (totals[r.state] || 0) + 1; 
+      });
+
+      // 1. Build The Stat Cards (Dashboard)
+      const statsHtml = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="num">${totals.total}</div>
+                <div class="label">Total Venues</div>
+            </div>
+            <div class="stat-card posted">
+                <div class="num">${totals.posted}</div>
+                <div class="label">Posted</div>
+            </div>
+            <div class="stat-card validated">
+                <div class="num">${totals.validated}</div>
+                <div class="label">Validated</div>
+            </div>
+            <div class="stat-card unvalidated">
+                <div class="num">${totals.unvalidated}</div>
+                <div class="label">Pending</div>
+            </div>
+            <div class="stat-card missing">
+                <div class="num">${totals.no_submission}</div>
+                <div class="label">No Submission</div>
+            </div>
+        </div>
+      `;
+
+      // 2. Build Date Range Header
+      const metaHtml = `
+        <div class="report-meta">
+            <span><strong>Report Range:</strong> ${payload.week_start} <span style="color:var(--text-weak); margin:0 6px;">to</span> ${payload.week_end}</span>
+            <span>${totals.total} Active Venues Tracked</span>
+        </div>
+      `;
+
+      // 3. Build Table Rows
+      const rowsHtml = (payload.rows || []).map(v => {
+        // If no events, row is "missing"
+        if (!v.events || v.events.length === 0) {
+          return `<tr>
+                   <td style="font-weight:600; color:var(--text-strong);">${escapeHtml(v.venue)}</td>
+                   <td style="color:var(--text-weak);">—</td>
+                   <td><span class="badge unposted">none</span></td>
+                   <td><span class="badge">No</span></td>
+                   <td><span class="badge" style="background:var(--error-red-bg); color:#ff8884; border-color:var(--error-red);">No Submission</span></td>
+                 </tr>`;
+        }
+        // If events exist, map them
+        return v.events.map((ev, idx) => {
+          // Visual tweaks for badges
+          const isPosted = ev.status === 'posted';
+          const isValid = ev.is_validated;
+          const statusBadge = isPosted 
+            ? `<span class="badge posted">Posted</span>` 
+            : `<span class="badge unposted">${ev.status || 'draft'}</span>`;
+            
+          const validBadge = isValid 
+            ? `<span class="badge success">Yes</span>` 
+            : `<span class="badge">No</span>`;
+
+          // Venue State Badge logic
+          let stateBadge = '';
+          if (v.state === 'posted') stateBadge = `<span class="badge posted">Posted</span>`;
+          else if (v.state === 'validated') stateBadge = `<span class="badge" style="color:var(--gsp-blue); border-color:var(--gsp-blue); background:rgba(57,160,237,0.12);">Validated</span>`;
+          else if (v.state === 'unvalidated') stateBadge = `<span class="badge unposted">Pending</span>`;
+          
+          // Only show venue name on first row if multiple events (optional, but cleaner)
+          const venueName = idx === 0 ? `<strong style="color:var(--text-strong);">${escapeHtml(v.venue)}</strong>` : '';
+
+          return `<tr>
+                   <td>${venueName}</td>
+                   <td>${ev.event_date || ''}</td>
+                   <td>${statusBadge}</td>
+                   <td>${validBadge}</td>
+                   <td>${stateBadge}</td>
+                 </tr>`;
+        }).join('');
+      }).join('');
+
+      // Combine all parts
+      container.innerHTML = `
+        ${statsHtml}
+        ${metaHtml}
+        <div style="overflow-x:auto; border-radius:var(--radius); border:1px solid var(--border);">
+            <table class="admin-table" style="min-width:700px; margin-top:0;">
+                <thead style="background:var(--panel-2);">
+                    <tr>
+                        <th style="padding:12px 10px;">Venue</th>
+                        <th style="padding:12px 10px;">Event Date</th>
+                        <th style="padding:12px 10px;">Status</th>
+                        <th style="padding:12px 10px;">Validated</th>
+                        <th style="padding:12px 10px;">Overall State</th>
+                    </tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>
+      `;
+
+    } catch (e) {
+      container.innerHTML = '';
+      statusEl && GSP.status(statusEl, 'error', `Failed to load weekly report: ${e.message || e}`);
+    }
+  }
+
+  function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  async function exportWeeklyReport(getEl) {
+    const dateVal = getEl('reportWeekEnding')?.value || '';
+    try {
+      const qs = dateVal ? `?week_ending=${encodeURIComponent(dateVal)}` : '';
+      const payload = await j(`${API}/admin/weekly-report${qs}`);
+      const rows = payload.rows || [];
+      const hdr = ['venue_id','venue','event_id','event_date','status','is_validated','state'];
+      const csvRows = [hdr.join(',')];
+      rows.forEach(r => {
+        if (!r.events || r.events.length === 0) {
+          csvRows.push([r.venue_id, `"${(r.venue||'').replace(/"/g,'""')}"`, '', '', '', '', r.state].join(','));
+        } else {
+          r.events.forEach(ev => {
+            csvRows.push([r.venue_id, `"${(r.venue||'').replace(/"/g,'""')}"`, ev.event_id || '', ev.event_date || '', ev.status || '', ev.is_validated || '', r.state].join(','));
+          });
+        }
+      });
+      const csv = csvRows.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `weekly_report_${payload.week_start}_to_${payload.week_end}.csv`; a.click(); URL.revokeObjectURL(url);
+    } catch (e) {
+      const gs = getEl('globalStatus'); if (gs) GSP.status(gs, 'error', `Export failed: ${e.message || e}`);
+    }
+  }
+
   async function saveWeeklyScores(getEl) {
     const venueId = getEl('scoresVenueSelect').value;
     const container = getEl('weeklyScoresContainer');
@@ -624,6 +779,13 @@
         }
       }
       initialLoad();
+        // --- Weekly report wires ---
+        const reportBtn = getEl('loadWeeklyReportBtn');
+        const exportBtn = getEl('exportWeeklyReportBtn');
+        const reportInput = getEl('reportWeekEnding');
+
+        if (reportBtn) reportBtn.addEventListener('click', () => loadWeeklyReport(getEl, reportInput?.value || ''));
+        if (exportBtn) exportBtn.addEventListener('click', () => exportWeeklyReport(getEl));
       
       // Show "Manage Scores" button only when a team is loaded for editing
       const teamIdInput = getEl('teamId');

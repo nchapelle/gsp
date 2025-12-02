@@ -160,7 +160,7 @@ function boot() {
     if (window.AdminPages && typeof window.AdminPages.initAdminEvent === "function") {
       window.AdminPages.initAdminEvent({ getEl: GSP.getEl });
     }
-  } else if (path === "/admin/data" || path.endsWith("/admin-data.html")) {
+  } else if (path === "/admin-data" || path.endsWith("/admin-data.html")) {
     if (!adminGate()) return;
     if (window.AdminData && typeof window.AdminData.init === "function") {
       window.AdminData.init({ getEl: GSP.getEl });

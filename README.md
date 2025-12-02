@@ -22,6 +22,9 @@ This repository contains the full-stack application for managing GSP events, fro
     -   Admin Portal: `https://app.gspevents.com/admin`
     -   Tournament Scores: `https://app.gspevents.com/tournament/scores`
 
+    New Admin Report:
+    - Weekly Post Report (Admin): The admin data page includes a "Weekly Post Report" to visualize which venues had a submitted event during a chosen week (EST Mon–Sun) and whether the event was unvalidated, validated, or posted. Backend endpoint: `GET /admin/weekly-report?week_ending=YYYY-MM-DD` returns a per-venue report for the requested week. Any date may be passed and the server will normalize it to the week-ending Sunday.
+
 ---
 
 ## Core API Workflow (Host Event Creation)

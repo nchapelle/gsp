@@ -31,6 +31,29 @@
       <p class="p">Search and edit Hosts, Venues, and Tournament Teams. Use the forms to create or update entries.</p>
     </section>
 
+    <!-- Weekly Post Report -->
+    <section class="card section">
+      <h2 class="h2">Weekly Post Report</h2>
+      <div class="row row-2">
+        <div class="form-group">
+          <label for="reportWeekEnding">Week ending (Sunday)</label>
+          <input id="reportWeekEnding" class="input" type="date" />
+          <div class="help">Pick any date within the week (we'll treat it as the week ending Sunday). If blank, server uses current week in EST.</div>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="loadWeeklyReportBtn" class="btn btn-primary">Show Report</button>
+            <button id="exportWeeklyReportBtn" class="btn btn-ghost">Export CSV</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="weeklyReportContainer" style="margin-top:12px;">
+        <!-- Filled by JS -->
+      </div>
+    </section>
+
     <!-- Hosts -->
     <section class="card section">
       <h2 class="h2">Hosts</h2>
@@ -118,6 +141,12 @@
             <label for="defaultTime">Default Time</label>
             <input id="defaultTime" class="input" placeholder="e.g., 7-9pm" />
           </div>
+        <div class="form-group">
+            <label class="kv-inline">
+              <input type="checkbox" id="venueIsActive" checked>
+              Active Venue (Show in reports and lists)
+            </label>
+        </div>
           <div class="form-group">
             <label for="accessKey">Access Key</label>
             <input id="accessKey" class="input" placeholder="(auto or regenerate)" />

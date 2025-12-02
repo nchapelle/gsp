@@ -12,6 +12,11 @@ from io import BytesIO
 from uuid import uuid4
 from urllib.parse import quote
 from datetime import datetime
+try:
+    # Python 3.9+ zoneinfo for proper EST-aware date math
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 import difflib
 import zipfile
 from datetime import date, timedelta
@@ -131,6 +136,18 @@ def getconn():
         port=PGPORT,
         ssl_context=ctx,
     )
+# ------------------------------------------------------------------------------
+# Date Helper
+# ------------------------------------------------------------------------------
+
+def get_week_ending(date_obj):
+    """
+    Given a date, returns the Sunday of that week (where Week starts Mon, ends Sun).
+    If date_obj is already Sunday, returns date_obj.
+    """
+    # weekday(): Mon=0 ... Sun=6
+    days_to_add = 6 - date_obj.weekday()
+    return date_obj + timedelta(days=days_to_add)
 
 # ------------------------------------------------------------------------------
 # Upload helpers
@@ -1401,20 +1418,35 @@ def get_hosts():
     finally:
         conn.close()
 
-@app.route("/venues")
-def get_venues():
+@app.get("/venues")
+def list_venues():
+    """
+    Public endpoint for Host Portal.
+    Only returns ACTIVE venues.
+    """
     conn = getconn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, default_day, default_time FROM venues ORDER BY name;")
-        rows = cur.fetchall()
-        return jsonify([
-            {"id": r[0], "name": r[1], "default_day": r[2], "default_time": r[3]}
-            for r in rows
-        ])
+        # UPDATED: Added WHERE is_active = TRUE
+        cur.execute("""
+            SELECT id, name, default_day, default_time 
+            FROM venues 
+            WHERE is_active = TRUE 
+            ORDER BY name
+        """)
+        
+        venues = []
+        for r in cur.fetchall():
+            venues.append({
+                "id": r[0],
+                "name": r[1],
+                "default_day": r[2],
+                "default_time": r[3]
+            })
+        return jsonify(venues)
     finally:
         conn.close()
-
+        
 @app.get("/venues/<int:vid>/recent-photos")
 def get_venue_recent_photos(vid):
     """
@@ -2336,22 +2368,6 @@ def update_ai_text(eid):
     finally:
         conn.close()
 
-# NOTE: /venues/<id>/recent-photos-zips removed intentionally — the
-# singular endpoint /venues/<id>/recent-photos-zip (without a `part`
-# query param) returns the packs metadata while /recent-photos-zip?part=
-# returns the actual zip. Keeping one canonical endpoint here reduces
-# surface area and chance of abuse.
-            as_attachment=True,
-            download_name=zip_filename, # Use the new dynamic filename
-        )
-    except Exception as e:
-        logger.exception("download_event_photos_zip failed")
-        try:
-            if 'conn' in locals() and conn:
-                conn.close()
-        except Exception:
-            pass
-        return jsonify({"error": str(e)}), 500
 
 # ------------------------------------------------------------------------------
 # Admin migrate PDF and sweeps
@@ -2647,45 +2663,31 @@ def admin_get_venue_detail(venue_id):
     finally:
         conn.close()
 
-@app.put("/admin/venues/<int:venue_id>")
-def admin_update_venue(venue_id):
-    data = request.json or {}
-    name = (data.get("name") or "").strip()
-    default_day = (data.get("default_day") or "").strip()
-    default_time = (data.get("default_time") or "").strip()
-    # Allowing access_key to be updated via this route, if provided by the frontend
-    access_key = data.get("access_key") # Can be null if not changed
-
-    if not name:
-        return jsonify({"error": "Venue name is required"}), 400
-
+@app.put("/admin/venues/<int:vid>")
+def admin_update_venue(vid):
+    if not require_host_token(): return jsonify({"error": "unauthorized"}), 401
+    data = request.json
+    name = data.get("name")
+    if not name: return jsonify({"error": "name required"}), 400
+    
     conn = getconn()
     try:
         cur = conn.cursor()
+        # Handle optional fields
+        dday = data.get("default_day")
+        dtime = data.get("default_time")
+        akey = data.get("access_key")
         
-        update_fields = ["name=%s", "default_day=%s", "default_time=%s"]
-        update_params = [name, default_day, default_time]
+        # Default to True if not provided, allowing toggle off
+        is_active = data.get("is_active", True) 
 
-        # Conditionally add access_key to the update if it's explicitly provided in the request body
-        # This allows regenerating a key and then saving the form, or explicitly setting one.
-        if access_key is not None: # Check for None to allow setting it to null explicitly if needed, though usually it's set to a new uuid.
-            update_fields.append("access_key=%s")
-            update_params.append(access_key)
-
-        update_params.append(venue_id) # WHERE clause parameter
-
-        cur.execute(
-            f"UPDATE venues SET {', '.join(update_fields)} WHERE id=%s;",
-            tuple(update_params)
-        )
+        cur.execute("""
+            UPDATE venues 
+            SET name=%s, default_day=%s, default_time=%s, access_key=%s, is_active=%s
+            WHERE id=%s
+        """, (name, dday, dtime, akey, is_active, vid))
         conn.commit()
-        if cur.rowcount == 0:
-            return jsonify({"error": "Venue not found"}), 404
-        return jsonify({"status": "ok", "id": venue_id})
-    except Exception as e:
-        logger.exception(f"admin_update_venue {venue_id} failed")
-        conn.rollback()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"success": True})
     finally:
         conn.close()
 
@@ -3036,29 +3038,36 @@ def admin_search_hosts():
 
 @app.get("/admin/search/venues")
 def admin_search_venues():
-    q = (request.args.get("q") or "").strip()
-    limit = min(int(request.args.get("limit", "25")), 200)
+    if not require_host_token(): return jsonify({"error": "unauthorized"}), 401
+    q = request.args.get("q", "").strip()
+    limit = int(request.args.get("limit", 20))
     conn = getconn()
     try:
         cur = conn.cursor()
-        if q:
-            like = f"%{q}%"
-            cur.execute(
-                "SELECT id, name, default_day, default_time, access_key "
-                "FROM venues WHERE LOWER(name) LIKE LOWER(%s) "
-                "ORDER BY name LIMIT %s;",
-                (like, limit)
-            )
+        if not q:
+            # Added is_active to selection
+            cur.execute("SELECT id, name, default_day, default_time, access_key, is_active FROM venues ORDER BY name LIMIT %s", (limit,))
         else:
-            cur.execute(
-                "SELECT id, name, default_day, default_time, access_key "
-                "FROM venues ORDER BY name LIMIT %s;",
-                (limit,)
-            )
-        rows = cur.fetchall()
-        return jsonify([
-            {"id": r[0], "name": r[1], "default_day": r[2], "default_time": r[3], "access_key": r[4]}
-        for r in rows])
+            term = f"%{q}%"
+            # Added is_active to selection
+            cur.execute("""
+                SELECT id, name, default_day, default_time, access_key, is_active
+                FROM venues WHERE name ILIKE %s ORDER BY name LIMIT %s
+            """, (term, limit))
+        
+        # Map 6 columns now
+        res = [
+            {
+                "id": r[0], 
+                "name": r[1], 
+                "default_day": r[2], 
+                "default_time": r[3], 
+                "access_key": r[4], 
+                "is_active": r[5]
+            } 
+            for r in cur.fetchall()
+        ]
+        return jsonify(res)
     finally:
         conn.close()
 
@@ -3597,6 +3606,76 @@ def parse_all_events():
     except Exception as e:
         logger.exception("parse_all_events failed")
         return jsonify({"error": str(e), "partial": results}), 500
+
+@app.get("/admin/weekly-report")
+def admin_weekly_report():
+    """
+    Returns a per-venue weekly report for a given week.
+    ONLY shows venues where is_active is TRUE.
+    """
+    wd = (request.args.get("week_ending") or "").strip()
+    try:
+        if wd:
+            dt = datetime.fromisoformat(wd).date()
+            week_end = get_week_ending(dt)
+        else:
+            if ZoneInfo:
+                now_est = datetime.now(tz=ZoneInfo("America/New_York"))
+            else:
+                now_est = datetime.now()
+            week_end = get_week_ending(now_est.date())
+    except Exception:
+        return jsonify({"error": "week_ending must be a date in YYYY-MM-DD format"}), 400
+
+    week_start = week_end - timedelta(days=6)
+
+    conn = getconn()
+    try:
+        cur = conn.cursor()
+        query = """
+            SELECT v.id, v.name,
+                   COALESCE(json_agg(json_build_object(
+                       'id', e.id, 
+                       'event_date', e.event_date, 
+                       'status', e.status, 
+                       'is_validated', e.is_validated
+                   ) ORDER BY e.event_date DESC) FILTER (WHERE e.id IS NOT NULL), '[]') AS events
+            FROM venues v
+            LEFT JOIN events e ON e.venue_id = v.id AND e.event_date >= %s AND e.event_date <= %s
+            WHERE v.is_active = TRUE
+            GROUP BY v.id, v.name
+            ORDER BY v.name;
+        """
+        cur.execute(query, (week_start, week_end))
+
+        rows = []
+        for r in cur.fetchall():
+            vid, vname, events_json = r
+            events = events_json or []
+
+            if not events:
+                state = 'no_submission'
+            else:
+                any_posted = any(((e.get('status') or '').lower() == 'posted') for e in events)
+                any_valid = any(e.get('is_validated') is True for e in events)
+                if any_posted: state = 'posted'
+                elif any_valid: state = 'validated'
+                else: state = 'unvalidated'
+
+            rows.append({
+                'venue_id': vid,
+                'venue': vname,
+                'events': events,
+                'state': state,
+            })
+
+        return jsonify({
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "rows": rows,
+        })
+    finally:
+        conn.close()
 
 @app.put("/admin/tournament/scores")
 def put_tournament_scores():

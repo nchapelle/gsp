@@ -97,6 +97,8 @@
     var highlights = getEl("highlights");
     var pdfFileInput = getEl("pdfRecap");
     var photoFilesInput = getEl("photos");
+    var pdfRecapNameEl = getEl('pdfRecapName');
+    var photosNameEl = getEl('photosName');
     var adjectiveSel = getEl("adjective");
     var showTypeSel = getEl("showType"); // Get reference to showType dropdown
     var submitButton = getEl("submitButton");
@@ -439,10 +441,10 @@
           var priorVenue = venueSel && venueSel.value ? String(venueSel.value) : "";
           var priorShowType = showTypeSel && showTypeSel.value ? String(showTypeSel.value) : "gsp";
 
-          hostSel.innerHTML = hosts.map(h => `<option value="${h.id}">${h.name}</option>`).join("");
+          hostSel.innerHTML = '<option value="">Select Host (required)</option>' + hosts.map(h => `<option value="${h.id}">${h.name}</option>`).join("");
           if (priorHost) hostSel.value = priorHost;
 
-          venueSel.innerHTML = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
+          venueSel.innerHTML = '<option value="">Select Venue (required)</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
           if (priorVenue) venueSel.value = priorVenue;
           
           if (showTypeSel) showTypeSel.value = priorShowType;
@@ -564,12 +566,50 @@
       resetButton.addEventListener("click", function () {
         if (eventDate) eventDate.value = "";
         if (highlights) highlights.value = "";
+        // Reset host/venue selections to placeholder
+        if (hostSel) hostSel.value = "";
+        if (venueSel) venueSel.value = "";
         if (pdfFileInput) pdfFileInput.value = "";
         if (photoFilesInput) photoFilesInput.value = "";
+        // Update visible filename text
+        if (pdfRecapNameEl) pdfRecapNameEl.textContent = 'No file selected';
+        if (photosNameEl) photosNameEl.textContent = 'No files selected';
         if (showTypeSel) showTypeSel.value = "gsp";
         clearStatus(uploadStatusDiv);
         if (fileListUL) { fileListUL.innerHTML = ""; fileListUL.style.display = "none"; }
         hideSegments();
+      });
+    }
+
+    // Show the chosen PDF filename when user selects a file
+    if (pdfFileInput) {
+      pdfFileInput.addEventListener('change', function () {
+        try {
+          if (pdfRecapNameEl) {
+            if (pdfFileInput.files && pdfFileInput.files.length) {
+              pdfRecapNameEl.textContent = pdfFileInput.files[0].name || '1 file selected';
+            } else {
+              pdfRecapNameEl.textContent = 'No file selected';
+            }
+          }
+        } catch (e) { console.warn('[hosts] failed to update pdfRecapName', e); }
+      });
+    }
+
+    // Update photos display when multiple files are selected
+    if (photoFilesInput) {
+      photoFilesInput.addEventListener('change', function () {
+        try {
+          if (!photosNameEl) return;
+          var files = photoFilesInput.files || [];
+          if (!files.length) {
+            photosNameEl.textContent = 'No files selected';
+          } else if (files.length === 1) {
+            photosNameEl.textContent = files[0].name || '1 file selected';
+          } else {
+            photosNameEl.textContent = files.length + ' files selected';
+          }
+        } catch (e) { console.warn('[hosts] failed to update photosName', e); }
       });
     }
 
