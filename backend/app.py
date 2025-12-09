@@ -47,7 +47,7 @@ app = Flask(__name__)
 
 raw_origins = os.getenv(
     "ALLOWED_ORIGINS",
-    "https://app.gspevents.com,https://gspevents.web.app,https://www.gspevents.com",
+    "https://app.gspevents.com,https://gspevents.web.app,https://www.gspevents.com,https://dodecahedron-buttercup-ejjm.squarespace.com",
 )
 for sep in ("|", " "):
     raw_origins = raw_origins.replace(sep, ",")
@@ -1843,6 +1843,100 @@ def list_events():
     finally:
         conn.close()
 
+@app.get("/public/events")
+def list_public_events():
+    conn = getconn()
+    try:
+        try:
+            limit = int(request.args.get('limit', 50))
+            offset = int(request.args.get('offset', 0))
+            venue_id = request.args.get('venue_id') # Optional filter
+        except ValueError:
+            limit = 50
+            offset = 0
+            venue_id = None
+            
+        if limit > 100: limit = 100
+
+        cur = conn.cursor()
+        
+        # Build the WHERE clause dynamically
+        where_clauses = ["e.status = 'posted'", "e.fb_event_url IS NOT NULL"]
+        params = []
+        
+        if venue_id:
+            where_clauses.append("e.venue_id = %s")
+            params.append(venue_id)
+            
+        # Add Limit/Offset parameters at the end
+        params.extend([limit, offset])
+        
+        where_sql = " AND ".join(where_clauses)
+
+        # SQL Query:
+        # 1. Joins events with venues/hosts.
+        # 2. Uses a lateral subquery (or correlated subquery) to get JSON array of top 3 teams.
+        #    This prevents N+1 queries and is very fast in Postgres.
+        query = f"""
+            SELECT e.id,
+                   e.event_date,
+                   e.ai_recap,
+                   e.fb_event_url,
+                   v.name AS venue_name,
+                   (
+                       SELECT json_agg(t) FROM (
+                           SELECT team_name, position
+                           FROM event_participation ep
+                           WHERE ep.event_id = e.id AND ep.position <= 3
+                           ORDER BY ep.position ASC
+                       ) t
+                   ) AS top_teams
+            FROM events e
+            LEFT JOIN venues v ON e.venue_id = v.id
+            WHERE {where_sql}
+            ORDER BY e.event_date DESC
+            LIMIT %s OFFSET %s;
+        """
+        
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        
+        events = []
+        for row in rows:
+            events.append({
+                "id": row[0],
+                "date_display": row[1].strftime("%B %d, %Y") if row[1] else "TBA",
+                "ai_recap": row[2],
+                "fb_event_url": row[3],
+                "venue": row[4],
+                # If no teams found, row[5] might be None, so default to empty list
+                "top_teams": row[5] if row[5] else []
+            })
+        
+        return jsonify(events)
+    finally:
+        conn.close()
+
+@app.get("/public/venues/search")
+def search_venues():
+    """
+    Returns a list of venues matching the search query.
+    Used for the autocomplete dropdown.
+    """
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify([])
+
+    conn = getconn()
+    try:
+        cur = conn.cursor()
+        # Case-insensitive search (ILIKE), limit 10 results
+        cur.execute("SELECT id, name FROM venues WHERE name ILIKE %s ORDER BY name LIMIT 10", (f'%{query}%',))
+        rows = cur.fetchall()
+        return jsonify([{"id": r[0], "name": r[1]} for r in rows])
+    finally:
+        conn.close()
+
 @app.get("/events/<int:eid>")
 def event_details(eid):
     conn = getconn()
@@ -3339,6 +3433,14 @@ def admin_replace_participation(eid):
                 eid, t.get("team_name"), t.get("score"), t.get("position"),
                 t.get("num_players"), bool(t.get("is_visiting")), bool(t.get("is_tournament"))
             ))
+            cur.execute("""
+                UPDATE events 
+                SET 
+                    total_teams = (SELECT COUNT(*) FROM event_participation WHERE event_id = %s),
+                    total_players = (SELECT SUM(num_players) FROM event_participation WHERE event_id = %s),
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (eid, eid, eid))
 
         # Now, call format_ai_recap with the correct dictionary and the new winners list
         if winners:
@@ -3835,6 +3937,7 @@ def validate_tournament_scores(venue_id, week_ending):
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()        
+        
 @app.post("/admin/bulk-upload-tournament-teams")
 def admin_bulk_upload_tournament_teams():
     """

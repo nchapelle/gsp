@@ -123,7 +123,7 @@
           method: "PUT",
           body: JSON.stringify({ status: "posted", fb_event_url: fbUrl })
         });
-        status(actionStatus, "success", "Event marked as posted.");
+        status(actionStatus, "success", "Event marked as posted and published to www.gspevents.com!");
         await loadEvent(eventId, els);
       } catch (err) {
         status(actionStatus, "error", `Failed to mark posted: ${err.message}`);

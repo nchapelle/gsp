@@ -21,9 +21,13 @@ This repository contains the full-stack application for managing GSP events, fro
     -   SMM Dashboard: `https://app.gspevents.com/smm`
     -   Admin Portal: `https://app.gspevents.com/admin`
     -   Tournament Scores: `https://app.gspevents.com/tournament/scores`
+    -   **Public Events Page**: `https://www.gspevents.com/events` (Squarespace/public site)
 
     New Admin Report:
     - Weekly Post Report (Admin): The admin data page includes a "Weekly Post Report" to visualize which venues had a submitted event during a chosen week (EST Mon–Sun) and whether the event was unvalidated, validated, or posted. Backend endpoint: `GET /admin/weekly-report?week_ending=YYYY-MM-DD` returns a per-venue report for the requested week. Any date may be passed and the server will normalize it to the week-ending Sunday.
+
+    Public Events:
+    - Public Events API: `GET /public/events` returns all posted events with FB URLs, optimized for SEO and Squarespace embedding. No authentication required. See `PUBLIC_EVENTS_SETUP.md` for integration details.
 
 ---
 

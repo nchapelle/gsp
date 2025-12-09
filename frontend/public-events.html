@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="GSP Events - Discover the latest recreational softball tournament results, highlights, and updates from top venues.">
+    <meta name="keywords" content="softball, GSP events, tournament results, recreational sports">
+    <meta name="author" content="GSP Events">
+    <meta name="robots" content="index, follow">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="GSP Events - Latest Tournament Results">
+    <meta property="og:description" content="Discover the latest recreational softball tournament results and highlights from GSP Events.">
+    <meta property="og:url" content="https://www.gspevents.com/events">
+    <meta property="og:site_name" content="GSP Events">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="GSP Events - Latest Tournament Results">
+    <meta name="twitter:description" content="Discover the latest recreational softball tournament results and highlights from GSP Events.">
+    
+    <title>GSP Events - Latest Tournament Results | Recreational Softball</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9f9f9;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.95;
+        }
+
+        .events-grid {
+            display: grid;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .event-card {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .event-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .event-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+        }
+
+        .event-date {
+            font-size: 1.4em;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .event-venue {
+            font-size: 1.1em;
+            opacity: 0.95;
+        }
+
+        .event-body {
+            padding: 25px;
+        }
+
+        .event-info {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            font-size: 0.95em;
+        }
+
+        .event-info-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .event-info-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .event-recap {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            line-height: 1.7;
+            color: #444;
+        }
+
+        .event-recap h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .event-highlights {
+            margin: 20px 0;
+        }
+
+        .event-highlights h4 {
+            margin-bottom: 10px;
+            font-size: 1em;
+            color: #333;
+        }
+
+        .photos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        .photos-grid img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 6px;
+            transition: transform 0.3s ease;
+        }
+
+        .photos-grid img:hover {
+            transform: scale(1.05);
+        }
+
+        .event-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95em;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background-color: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #5568d3;
+        }
+
+        .btn-secondary {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background-color: #e8e8e8;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state h2 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background-color: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        footer {
+            background-color: #f0f0f0;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #ddd;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.8em;
+            }
+
+            .event-info {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .event-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .photos-grid {
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            }
+        }
+
+        .badge {
+            display: inline-block;
+            background: #e8e8ff;
+            color: #667eea;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .badge.validated {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        /* SEO-friendly structured data for search engines */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>GSP Events</h1>
+        <p>Recreational Softball Tournament Results & Highlights</p>
+    </header>
+
+    <div class="container">
+        <div id="errorContainer"></div>
+        <div id="loadingContainer" class="loading">
+            <p>Loading events...</p>
+        </div>
+        <div id="eventsContainer" style="display: none;">
+            <div class="events-grid" id="eventsList"></div>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 GSP Events. All rights reserved.</p>
+        <p>For more information, visit us on <a href="https://www.facebook.com/gspevents" target="_blank">Facebook</a></p>
+    </footer>
+
+    <script src="https://api.gspevents.com/public/events"></script>
+    <script>
+        (function() {
+            const API_BASE_URL = 'https://api.gspevents.com';
+            const eventsContainer = document.getElementById('eventsList');
+            const loadingContainer = document.getElementById('loadingContainer');
+            const eventsDisplay = document.getElementById('eventsContainer');
+            const errorContainer = document.getElementById('errorContainer');
+
+            async function loadEvents() {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/public/events`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const events = await response.json();
+                    
+                    loadingContainer.style.display = 'none';
+                    
+                    if (!events || events.length === 0) {
+                        eventsContainer.innerHTML = `
+                            <div class="empty-state">
+                                <h2>No Events Yet</h2>
+                                <p>Check back soon for upcoming tournament results and highlights.</p>
+                            </div>
+                        `;
+                        eventsDisplay.style.display = 'block';
+                        return;
+                    }
+
+                    eventsContainer.innerHTML = events.map(event => renderEventCard(event)).join('');
+                    eventsDisplay.style.display = 'block';
+                } catch (error) {
+                    console.error('Error loading events:', error);
+                    loadingContainer.style.display = 'none';
+                    errorContainer.innerHTML = `
+                        <div class="error">
+                            <strong>Error Loading Events</strong>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                }
+            }
+
+            function renderEventCard(event) {
+                const photosHTML = event.photos && event.photos.length > 0
+                    ? `<div class="photos-grid">${event.photos.map(url => 
+                        `<img src="${escapeHtml(url)}" alt="Event photo" loading="lazy">`
+                      ).join('')}</div>`
+                    : '';
+
+                const recapHTML = event.ai_recap
+                    ? `<div class="event-recap">
+                        <h3>Event Recap</h3>
+                        <p>${escapeHtml(event.ai_recap)}</p>
+                       </div>`
+                    : '';
+
+                const highlightsHTML = event.highlights
+                    ? `<div class="event-highlights">
+                        <h4>Highlights</h4>
+                        <p>${escapeHtml(event.highlights)}</p>
+                       </div>`
+                    : '';
+
+                const pdfBtn = event.pdf_url
+                    ? `<a href="${escapeHtml(event.pdf_url)}" target="_blank" class="btn btn-secondary">📄 View PDF</a>`
+                    : '';
+
+                const fbBtn = event.fb_event_url
+                    ? `<a href="${escapeHtml(event.fb_event_url)}" target="_blank" class="btn btn-primary">📘 View on Facebook</a>`
+                    : '';
+
+                return `
+                    <article class="event-card" itemscope itemtype="https://schema.org/Event">
+                        <meta itemprop="name" content="${escapeHtml(event.venue || 'GSP Event')} - ${event.date_display}">
+                        <meta itemprop="startDate" content="${event.date}">
+                        ${event.photos && event.photos[0] ? `<meta itemprop="image" content="${escapeHtml(event.photos[0])}">` : ''}
+                        
+                        <div class="event-header">
+                            <div class="event-date">${escapeHtml(event.date_display)}</div>
+                            <div class="event-venue">${escapeHtml(event.venue || 'TBA')}</div>
+                        </div>
+                        
+                        <div class="event-body">
+                            <div class="event-info">
+                                ${event.host ? `<div class="event-info-item"><span class="event-info-label">Host:</span> <span>${escapeHtml(event.host)}</span></div>` : ''}
+                                ${event.photo_count ? `<div class="event-info-item"><span class="event-info-label">Photos:</span> <span>${event.photo_count}</span></div>` : ''}
+                                ${event.is_validated ? `<span class="badge validated">✓ Validated</span>` : ''}
+                            </div>
+
+                            ${photosHTML}
+                            ${recapHTML}
+                            ${highlightsHTML}
+
+                            <div class="event-actions">
+                                ${fbBtn}
+                                ${pdfBtn}
+                            </div>
+                        </div>
+                    </article>
+                `;
+            }
+
+            function escapeHtml(text) {
+                if (!text) return '';
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return text.replace(/[&<>"']/g, m => map[m]);
+            }
+
+            // Load events on page load
+            document.addEventListener('DOMContentLoaded', loadEvents);
+        })();
+    </script>
+</body>
+</html>

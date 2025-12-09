@@ -381,7 +381,7 @@
         })).filter(r => r.team_name);
 
         // Existing save to participation endpoint
-        await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: { teams: rows } });
+        await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: JSON.stringify({ teams: rows }) });
         GSP.status(statusEl, 'success', 'Rankings saved.');
 
       } catch (err) {
