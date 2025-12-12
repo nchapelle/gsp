@@ -69,6 +69,29 @@ curl -X POST https://api.gspevents.com/migrate
 curl https://api.gspevents.com/doctor
 ```
 
+Database schema update for `venues` (Default Host)
+ - This project now supports assigning a Default Host to venues (`venues.default_host_id`) and an `is_active` flag on venues.
+ - If your database is new or you prefer the automatic route, re-running the migrate endpoint will create/verify the current schema:
+
+```bash
+curl -X POST https://api.gspevents.com/migrate
+```
+
+If you need to apply the change to an existing production database manually, run the following SQL (example using `psql`):
+
+```bash
+# Run these against your database (adjust connection params as needed)
+psql "host=$PGHOST dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD port=$PGPORT sslmode=require" -c "ALTER TABLE venues ADD COLUMN IF NOT EXISTS default_host_id INTEGER;"
+psql "host=$PGHOST dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD port=$PGPORT sslmode=require" -c "ALTER TABLE venues ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;"
+psql "host=$PGHOST dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD port=$PGPORT sslmode=require" -c "ALTER TABLE venues ADD COLUMN IF NOT EXISTS show_type TEXT DEFAULT 'gsp';"
+psql "host=$PGHOST dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD port=$PGPORT sslmode=require" -c "ALTER TABLE venues ADD COLUMN IF NOT EXISTS notes TEXT;"
+psql "host=$PGHOST dbname=$PGDATABASE user=$PGUSER password=$PGPASSWORD port=$PGPORT sslmode=require" -c "ALTER TABLE venues ADD CONSTRAINT IF NOT EXISTS venues_default_host_id_fkey FOREIGN KEY (default_host_id) REFERENCES hosts(id) ON DELETE SET NULL;"
+```
+
+Notes:
+- The `ALTER TABLE` SQL above is safe to run on a live database and will add `default_host_id`, `is_active`, `show_type`, and `notes` columns to the venues table.
+- After applying the SQL or running the migrate endpoint, redeploy the backend so the API and frontend are consistent.
+
 ---
 
 ## Environment Variables (Cloud Run)

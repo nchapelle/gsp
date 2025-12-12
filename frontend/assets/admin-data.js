@@ -2,6 +2,7 @@
 /* global CONFIG, GSP */
 (function () {
   const API = CONFIG.API_BASE_URL;
+  let hostsCache = [];
 
   // ---------- Utilities ----------
   function debounce(fn, ms) {
@@ -178,6 +179,8 @@
           getEl("venueName").value = v.name || "";
           getEl("defaultDay").value = v.default_day || "";
           getEl("defaultTime").value = v.default_time || "";
+          // Default host (new)
+          try { if (getEl("venueDefaultHost")) getEl("venueDefaultHost").value = v.default_host_id || ""; } catch (e) {}
           getEl("accessKey").value = v.access_key || "";
           
           // Set checkbox
@@ -337,6 +340,7 @@
       const name = (getEl("venueName").value || "").trim();
       const default_day = (getEl("defaultDay").value || "").trim();
       const default_time = (getEl("defaultTime").value || "").trim();
+      const default_host_id = getEl("venueDefaultHost")?.value ? parseInt(getEl("venueDefaultHost").value, 10) : null;
       const access_key = (getEl("accessKey").value || "").trim() || null;
       
       // Get Checkbox value
@@ -347,7 +351,7 @@
         if (id) {
           await j(`${API}/admin/venues/${id}`, { 
               method: "PUT", 
-              body: JSON.stringify({ name, default_day, default_time, access_key, is_active }) 
+              body: JSON.stringify({ name, default_day, default_time, access_key, is_active, default_host_id }) 
           });
           // ... update links ...
           st && GSP.status(st, "success", "Venue updated.");
@@ -355,7 +359,7 @@
           // For Create, backend defaults is_active=True, but we can send it explicitly
           const r = await j(`${API}/admin/venues`, { 
               method: "POST", 
-              body: JSON.stringify({ name, default_day, default_time, is_active }) 
+              body: JSON.stringify({ name, default_day, default_time, is_active, default_host_id }) 
           });
           // ... update links ...
           st && GSP.status(st, "success", `Venue created. ID: ${r.id}`);
@@ -378,6 +382,30 @@
     } catch (e) {
       const gs = getEl("globalStatus");
       if (gs) GSP.status(gs, "error", "Failed to load venues for team form.");
+    }
+  }
+
+  // ---------- Hosts Loading ----------
+  async function loadHosts(getEl) {
+    try {
+      const hosts = await j(`${API}/hosts`);
+      hostsCache = hosts || [];
+      // Populate venue default host select if present
+      const vsel = getEl('venueDefaultHost');
+      if (vsel) {
+        const opts = ['<option value="">(no default host)</option>'].concat(
+          hostsCache.map(h => `<option value="${h.id}">${h.name}${h.email ? ` • ${h.email}` : ''}</option>`)
+        );
+        vsel.innerHTML = opts.join('');
+      }
+      // Update any schedule builder host selects that may exist
+      document.querySelectorAll('.schedule-host-select').forEach(s => {
+        const cur = s.value || '';
+        s.innerHTML = '<option value="">(no default host)</option>' + hostsCache.map(h => `<option value="${h.id}">${h.name}${h.email ? ` • ${h.email}` : ''}</option>`).join('');
+        if (cur) s.value = cur;
+      });
+    } catch (e) {
+      GSP.status(getEl('globalStatus'), 'error', 'Failed to load hosts.');
     }
   }
 
@@ -551,6 +579,15 @@
           totals[r.state] = (totals[r.state] || 0) + 1; 
       });
 
+      // Sort rows by default_day (Mon->Sun) then by venue name
+      const dayOrder = { 'Monday':1,'Tuesday':2,'Wednesday':3,'Thursday':4,'Friday':5,'Saturday':6,'Sunday':7 };
+      payload.rows = (payload.rows || []).slice().sort((a,b) => {
+        const ra = dayOrder[a.default_day] || 99;
+        const rb = dayOrder[b.default_day] || 99;
+        if (ra !== rb) return ra - rb;
+        return (a.venue || '').toLowerCase().localeCompare((b.venue || '').toLowerCase());
+      });
+
       // 1. Build The Stat Cards (Dashboard)
       const statsHtml = `
         <div class="stats-grid">
@@ -707,6 +744,356 @@
     }
   }
 
+  // ---------- Weekly Schedule Builder ----------
+  function buildDayOptions(selected) {
+    const days = ['', 'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    return days.map(d => `<option value="${d}" ${d===selected? 'selected':''}>${d?d:'—'}</option>`).join('');
+  }
+
+  async function renderScheduleBuilder(getEl) {
+    const container = getEl('scheduleBuilderContainer');
+    const gs = getEl('globalStatus');
+    if (!container) return;
+    try {
+      container.innerHTML = '<div style="padding:16px; color:var(--text-weak);">Loading active venues…</div>';
+      // Ensure hosts are loaded
+      if (!hostsCache || !hostsCache.length) await loadHosts(getEl);
+      const venues = await j(`${API}/venues`);
+      const active = (venues || []).filter(v => v.is_active !== false);
+      // Sort by day (Mon->Sun) then by name
+      const dayOrder = { 'Monday':1,'Tuesday':2,'Wednesday':3,'Thursday':4,'Friday':5,'Saturday':6,'Sunday':7 };
+      active.sort((a,b) => {
+        const da = (a.default_day || '');
+        const db = (b.default_day || '');
+        const ra = dayOrder[da] || 99;
+        const rb = dayOrder[db] || 99;
+        if (ra !== rb) return ra - rb;
+        return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+      });
+      if (!active.length) {
+        container.innerHTML = '<div style="padding:12px; color:var(--text-weak);">No active venues found.</div>';
+        return;
+      }
+
+      const rows = active.map(v => {
+        const hostOptions = ['<option value="">(no default host)</option>'].concat(hostsCache.map(h => `<option value="${h.id}" ${String(v.default_host_id)===String(h.id)? 'selected':''}>${h.name}${h.email? ' • ' + h.email : ''}</option>`)).join('');
+        const showTypeVal = v.show_type || 'gsp';
+        return `
+          <div class="schedule-row" data-id="${v.id}" data-name="${escapeHtml(v.name)}" data-show-type="${showTypeVal}" data-original-day="${v.default_day||''}" data-original-time="${v.default_time||''}" data-original-host="${v.default_host_id||''}" data-original-cancelled="false" data-original-cancel-reason="" data-is-active="${v.is_active!==false}" data-cancelled="false" data-cancel-reason="">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <div style="flex:1; font-weight:600;">${escapeHtml(v.name)} <span class="badge cancel-badge" style="display:none; background:var(--error-red-bg); color:var(--error-red); border-color:var(--error-red); margin-left:8px;">CANCELED</span></div>
+              <div style="width:140px;">
+                <select class="input schedule-day-select">${buildDayOptions(v.default_day||'')}</select>
+              </div>
+              <div style="width:140px;"><input class="input schedule-time-input" value="${v.default_time||''}" placeholder="e.g., 7-9pm" /></div>
+              <div style="width:240px;"><select class="input schedule-host-select">${hostOptions}</select></div>
+              <div style="width:120px; display:flex; gap:8px;">
+                <button class="btn btn-ghost btn-cancel-row">Cancel</button>
+                <button class="btn btn-ghost btn-clear-cancel" style="display:none;">Clear</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = rows;
+      // Wire cancel buttons for each row
+      container.querySelectorAll('.schedule-row').forEach(row => {
+        const cancelBtn = row.querySelector('.btn-cancel-row');
+        const clearBtn = row.querySelector('.btn-clear-cancel');
+        const badge = row.querySelector('.cancel-badge');
+        const setCancelledUI = (reason) => {
+          row.dataset.cancelled = reason ? 'true' : 'false';
+          row.dataset.cancelReason = reason || '';
+          if (reason) {
+            if (badge) badge.style.display = 'inline-block';
+            if (clearBtn) clearBtn.style.display = 'inline-flex';
+            if (cancelBtn) cancelBtn.textContent = 'Edit';
+          } else {
+            if (badge) badge.style.display = 'none';
+            if (clearBtn) clearBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.textContent = 'Cancel';
+          }
+        };
+
+        cancelBtn?.addEventListener('click', (e) => {
+          e.preventDefault();
+          // open modal and edit reason
+          const modal = document.getElementById('cancelReasonModal');
+          const title = document.getElementById('cancelModalTitle');
+          const txt = document.getElementById('cancelReasonText');
+          modal.style.display = 'flex';
+          title.textContent = `Cancel: ${row.dataset.name}`;
+          txt.value = row.dataset.cancelReason || '';
+          // Attach row reference to modal save button
+          modal.dataset.targetRowId = row.dataset.id;
+          modal.dataset.targetRowName = row.dataset.name;
+        });
+
+        clearBtn?.addEventListener('click', (e) => {
+          e.preventDefault();
+          setCancelledUI('');
+        });
+      });
+
+      // Modal wiring (single instance)
+      const cancelModal = document.getElementById('cancelReasonModal');
+      const closeCancelModalBtn = document.getElementById('closeCancelModalBtn');
+      const saveCancelReasonBtn = document.getElementById('saveCancelReasonBtn');
+      const clearCancelReasonBtn = document.getElementById('clearCancelReasonBtn');
+      const cancelReasonText = document.getElementById('cancelReasonText');
+
+      closeCancelModalBtn?.addEventListener('click', () => { if (cancelModal) cancelModal.style.display = 'none'; });
+      cancelModal?.addEventListener('click', (e) => { if (e.target === cancelModal) cancelModal.style.display = 'none'; });
+
+      saveCancelReasonBtn?.addEventListener('click', () => {
+        const id = cancelModal?.dataset?.targetRowId;
+        const reason = (cancelReasonText?.value || '').trim();
+        if (!id) { if (cancelModal) cancelModal.style.display = 'none'; return; }
+        // find the row with matching data-id
+        const row = container.querySelector(`.schedule-row[data-id="${id}"]`);
+        if (row) {
+          row.dataset.cancelled = reason ? 'true' : 'false';
+          row.dataset.cancelReason = reason || '';
+          const badge = row.querySelector('.cancel-badge');
+          const clearBtn = row.querySelector('.btn-clear-cancel');
+          const cancelBtn = row.querySelector('.btn-cancel-row');
+          if (reason) {
+            if (badge) badge.style.display = 'inline-block';
+            if (clearBtn) clearBtn.style.display = 'inline-flex';
+            if (cancelBtn) cancelBtn.textContent = 'Edit';
+          } else {
+            if (badge) badge.style.display = 'none';
+            if (clearBtn) clearBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.textContent = 'Cancel';
+          }
+        }
+        if (cancelModal) cancelModal.style.display = 'none';
+      });
+
+      clearCancelReasonBtn?.addEventListener('click', () => {
+        cancelReasonText.value = '';
+      });
+    } catch (e) {
+      container.innerHTML = '';
+      gs && GSP.status(gs, 'error', `Schedule load failed: ${e.message || e}`);
+    }
+  }
+
+    function generateScheduleText(getEl) {
+    const container = getEl('scheduleBuilderContainer');
+    if (!container) return;
+    // Compute this week's Monday (start) and Saturday (end)
+    const today = new Date();
+    const dow = today.getDay(); // Sun=0..Sat=6
+    // compute Monday of current week: if today is Sunday (0), go back 6 days to Monday
+    const daysBackToMonday = (dow === 0) ? 6 : (dow - 1);
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysBackToMonday);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    function fmtDate(d) {
+      const mm = d.getMonth() + 1;
+      const dd = d.getDate();
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${mm}.${dd}.${yy}`;
+    }
+
+    const header = [];
+    header.push('***WEEKLY SCHEDULE***');
+    header.push(`This week's schedule (Monday ${fmtDate(monday)} through Saturday ${fmtDate(saturday)}) and your free "Mystery Bonus Question".`);
+    header.push('***Reply to this post with the correct answer to the "Big Bonus" question by 12pm this Friday and you will be entered into a drawing for a GSP T-Shirt!');
+    header.push('-----------------------------------------------------');
+
+    const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const groups = {};
+    dayOrder.forEach(d => groups[d] = []);
+
+    container.querySelectorAll('.schedule-row').forEach(row => {
+      const name = row.dataset.name || '';
+      const daySelect = row.querySelector('.schedule-day-select');
+      let day = daySelect?.value || '';
+      const time = row.querySelector('.schedule-time-input')?.value || '';
+      const showType = row.dataset.showType || 'gsp';
+      const hostId = row.querySelector('.schedule-host-select')?.value || '';
+      const host = hostsCache.find(h => String(h.id) === String(hostId));
+      const hostText = host ? ` w/ ${host.name}` : '';
+      
+      // Debug logging
+      console.log('Processing venue:', name, 'day:', day, 'time:', time, 'host:', hostText, 'showType:', showType);
+      
+      // Check for cancellation
+      const isCancelled = row.dataset.cancelled === 'true';
+      const cancelReason = row.dataset.cancelReason || '';
+      
+      let timeText = '';
+      if (isCancelled) {
+        timeText = cancelReason ? ` ***CANCELED ${cancelReason}***` : ' ***CANCELED***';
+      } else {
+        timeText = time ? ` (${time})` : '';
+      }
+      
+      const line = { name, hostText, timeText, showType };
+      // Add to day group - if no day selected, skip this venue
+      if (day && groups[day]) {
+        console.log('Adding to', day, ':', line);
+        groups[day].push(line);
+      } else {
+        console.log('Skipping venue (no valid day):', name, 'day value was:', day);
+      }
+    });
+
+    const out = header.slice();
+    // For Monday->Saturday only
+    for (let i = 0; i < 6; i++) {
+      const dayName = dayOrder[i];
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      out.push('');
+      out.push(`${dayName.toUpperCase()} ${fmtDate(d)}:`);
+      
+      const rows = groups[dayName] || [];
+      console.log(`Day ${dayName} has ${rows.length} venues:`, rows);
+      if (rows.length === 0) {
+        out.push('- No scheduled venues');
+      } else {
+        // Group by show_type (case-insensitive comparison)
+        const gspRows = rows.filter(r => (r.showType || '').toLowerCase() === 'gsp').sort((a,b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        const musingoRows = rows.filter(r => (r.showType || '').toLowerCase() === 'musingo').sort((a,b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        const privateRows = rows.filter(r => (r.showType || '').toLowerCase() === 'private').sort((a,b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        
+        console.log(`GSP: ${gspRows.length}, Musingo: ${musingoRows.length}, Private: ${privateRows.length}`);
+        
+        if (gspRows.length) {
+          out.push('GAME SHOW PALOOZA');
+          gspRows.forEach(r => out.push(`- ${r.name}${r.hostText}${r.timeText}`));
+        }
+        if (musingoRows.length) {
+          out.push('MUSINGO');
+          musingoRows.forEach(r => out.push(`- ${r.name}${r.hostText}${r.timeText}`));
+        }
+        if (privateRows.length) {
+          out.push('PRIVATE');
+          privateRows.forEach(r => out.push(`- ${r.name}${r.hostText}${r.timeText}`));
+        }
+      }
+    }
+
+    out.push('-----------------------------------------------------');
+    out.push('********BONUS QUESTION*******');
+
+    getEl('scheduleBuilderOutput').value = out.join('\n');
+  }
+
+  async function saveHostChanges(getEl) {
+    const container = getEl('scheduleBuilderContainer');
+    const gs = getEl('globalStatus');
+    if (!container) return;
+    
+    const rows = Array.from(container.querySelectorAll('.schedule-row'));
+    const toSave = [];
+    
+    rows.forEach(row => {
+      const id = row.dataset.id;
+      const name = row.dataset.name;
+      const origHost = row.dataset.originalHost || '';
+      const hostId = row.querySelector('.schedule-host-select')?.value || '';
+      
+      // Only save if host changed
+      if (String(hostId) !== String(origHost)) {
+        toSave.push({ 
+          id, 
+          name,
+          default_host_id: hostId ? parseInt(hostId, 10) : null
+        });
+      }
+    });
+
+    if (!toSave.length) { 
+      GSP.status(gs, 'info', 'No host changes to save.'); 
+      return; 
+    }
+    
+    try {
+      GSP.status(gs, 'info', `Saving ${toSave.length} host changes…`);
+      await Promise.all(toSave.map(v => j(`${API}/admin/venues/${v.id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ 
+          name: v.name,
+          default_host_id: v.default_host_id
+        }) 
+      })));
+      GSP.status(gs, 'success', `Updated default host for ${toSave.length} venue(s).`);
+      // Reload to refresh originals
+      await renderScheduleBuilder(getEl);
+    } catch (e) {
+      GSP.status(gs, 'error', `Save failed: ${e.message || e}`);
+    }
+  }
+
+   async function saveScheduleChanges(getEl) {
+    const container = getEl('scheduleBuilderContainer');
+    const gs = getEl('globalStatus');
+    if (!container) return;
+    const rows = Array.from(container.querySelectorAll('.schedule-row'));
+    const toSave = [];
+    rows.forEach(row => {
+      const id = row.dataset.id;
+      const name = row.dataset.name;
+      const origDay = row.dataset.originalDay || row.dataset.originalDay === '' ? row.dataset.originalDay : row.getAttribute('data-original-day');
+      const origTime = row.dataset.originalTime || row.getAttribute('data-original-time');
+      const origHost = row.dataset.originalHost || row.getAttribute('data-original-host');
+      const origShowType = row.dataset.originalShowType || 'gsp';
+      const origCancelled = row.dataset.originalCancelled || 'false';
+      const origCancelReason = row.dataset.originalCancelReason || '';
+      
+      const day = row.querySelector('.schedule-day-select')?.value || '';
+      const time = row.querySelector('.schedule-time-input')?.value || '';
+      const hostId = row.querySelector('.schedule-host-select')?.value || '';
+      const isCancelled = row.dataset.cancelled === 'true' ? 'true' : 'false';
+      const cancelReason = row.dataset.cancelReason || '';
+      
+      // Check if any field changed: day, time, host, or cancellation
+      if (String(day) !== String(origDay) || 
+          String(time) !== String(origTime) || 
+          String(hostId) !== String(origHost) ||
+          String(isCancelled) !== String(origCancelled) ||
+          String(cancelReason) !== String(origCancelReason)) {
+        toSave.push({ 
+          id, 
+          name, 
+          default_day: day || null, 
+          default_time: time || null, 
+          default_host_id: hostId ? parseInt(hostId,10) : null, 
+          is_active: row.dataset.isActive === 'true',
+          notes: cancelReason || null // Store cancel reason in notes field (or create a new DB column)
+        });
+      }
+    });
+
+    if (!toSave.length) { GSP.status(gs, 'info', 'No changes to save.'); return; }
+    try {
+      GSP.status(gs, 'info', `Saving ${toSave.length} venues…`);
+      await Promise.all(toSave.map(v => j(`${API}/admin/venues/${v.id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ 
+          name: v.name, 
+          default_day: v.default_day, 
+          default_time: v.default_time, 
+          default_host_id: v.default_host_id,
+          is_active: v.is_active,
+          notes: v.notes
+        }) 
+      })));
+      GSP.status(gs, 'success', 'Schedule updates saved.');
+      // Reload builder to refresh originals
+      await renderScheduleBuilder(getEl);
+    } catch (e) {
+      GSP.status(gs, 'error', `Save failed: ${e.message || e}`);
+    }
+  }
+
   // ---------- Public init (called by main.js) ----------
   window.AdminData = {
     init: function ({ getEl }) {
@@ -774,11 +1161,20 @@
             const optionsHtml = '<option value="">Select Home Venue (Optional)</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
             if(teamHomeVenueSelect) teamHomeVenueSelect.innerHTML = optionsHtml;
             if(scoresVenueSelectModal) scoresVenueSelectModal.innerHTML = optionsHtml;
+            // Load hosts and fill venue default host dropdown
+            await loadHosts(getEl);
         } catch (e) {
             GSP.status(getEl('globalStatus'), 'error', 'Failed to load venues for dropdowns.');
         }
       }
       initialLoad();
+      // --- Schedule Builder wires ---
+      const loadScheduleBtn = getEl('loadScheduleBtn');
+      const generateScheduleBtn = getEl('generateScheduleBtn');
+      const saveHostChangesBtn = getEl('saveHostChangesBtn');
+      loadScheduleBtn?.addEventListener('click', () => renderScheduleBuilder(getEl));
+      generateScheduleBtn?.addEventListener('click', () => generateScheduleText(getEl));
+      saveHostChangesBtn?.addEventListener('click', () => saveHostChanges(getEl));
         // --- Weekly report wires ---
         const reportBtn = getEl('loadWeeklyReportBtn');
         const exportBtn = getEl('exportWeeklyReportBtn');

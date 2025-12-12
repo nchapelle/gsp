@@ -1273,7 +1273,11 @@ def migrate():
               name TEXT UNIQUE NOT NULL,
               default_day TEXT,
               default_time TEXT,
-              access_key TEXT UNIQUE
+              default_host_id INTEGER REFERENCES hosts(id) ON DELETE SET NULL,
+              show_type TEXT DEFAULT 'GSP',
+              access_key TEXT UNIQUE,
+              is_active BOOLEAN DEFAULT TRUE,
+              notes TEXT
             );
         """)
         cur.execute("""
@@ -1429,7 +1433,7 @@ def list_venues():
         cur = conn.cursor()
         # UPDATED: Added WHERE is_active = TRUE
         cur.execute("""
-            SELECT id, name, default_day, default_time 
+            SELECT id, name, default_day, default_time, default_host_id, show_type, notes
             FROM venues 
             WHERE is_active = TRUE 
             ORDER BY name
@@ -1441,7 +1445,10 @@ def list_venues():
                 "id": r[0],
                 "name": r[1],
                 "default_day": r[2],
-                "default_time": r[3]
+                "default_time": r[3],
+                "default_host_id": r[4],
+                "show_type": r[5],
+                "notes": r[6]
             })
         return jsonify(venues)
     finally:
@@ -2673,6 +2680,9 @@ def admin_add_venue():
     name = (data.get("name") or "").strip()
     default_day = (data.get("default_day") or "").strip()
     default_time = (data.get("default_time") or "").strip()
+    default_host_id = data.get("default_host_id") if data.get("default_host_id") is not None else None
+    is_active = data.get("is_active", True)
+    show_type = (data.get("show_type") or "gsp").strip()
     if not name:
         return jsonify({"error": "Venue name is required"}), 400
     conn = getconn()
@@ -2683,8 +2693,8 @@ def admin_add_venue():
         if existing_id:
             return jsonify({"status": "exists", "id": existing_id[0]}), 200
         cur.execute(
-            "INSERT INTO venues (name, default_day, default_time) VALUES (%s, %s, %s) RETURNING id;",
-            (name, default_day, default_time)
+            "INSERT INTO venues (name, default_day, default_time, default_host_id, show_type, is_active) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;",
+            (name, default_day, default_time, default_host_id, show_type, is_active)
         )
         new_id = cur.fetchone()[0]
         conn.commit()
@@ -2702,10 +2712,10 @@ def admin_list_venues():
     conn = getconn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, default_day, default_time, access_key FROM venues ORDER BY name;")
+        cur.execute("SELECT id, name, default_day, default_time, access_key, is_active, default_host_id, show_type, notes FROM venues ORDER BY name;")
         rows = cur.fetchall()
         return jsonify([
-            {"id": r[0], "name": r[1], "default_day": r[2], "default_time": r[3], "access_key": r[4]}
+            {"id": r[0], "name": r[1], "default_day": r[2], "default_time": r[3], "access_key": r[4], "is_active": r[5], "default_host_id": r[6], "show_type": r[7], "notes": r[8]}
             for r in rows
         ])
     finally:
@@ -2717,6 +2727,9 @@ def admin_create_venue():
     name = (data.get("name") or "").strip()
     default_day = (data.get("default_day") or "").strip()
     default_time = (data.get("default_time") or "").strip()
+    default_host_id = data.get("default_host_id") if data.get("default_host_id") is not None else None
+    is_active = data.get("is_active", True)
+    show_type = (data.get("show_type") or "gsp").strip()
     
     if not name:
         return jsonify({"error": "Venue name is required"}), 400
@@ -2731,8 +2744,8 @@ def admin_create_venue():
         if existing_id:
             return jsonify({"status": "exists", "id": existing_id[0]}), 200
         cur.execute(
-            "INSERT INTO venues (name, default_day, default_time, access_key) VALUES (%s, %s, %s, %s) RETURNING id;",
-            (name, default_day, default_time, new_access_key)
+            "INSERT INTO venues (name, default_day, default_time, default_host_id, show_type, access_key, is_active) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id;",
+            (name, default_day, default_time, default_host_id, show_type, new_access_key, is_active)
         )
         new_id = cur.fetchone()[0]
         conn.commit()
@@ -2749,11 +2762,11 @@ def admin_get_venue_detail(venue_id):
     conn = getconn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, default_day, default_time, access_key FROM venues WHERE id=%s;", (venue_id,))
+        cur.execute("SELECT id, name, default_day, default_time, access_key, is_active, default_host_id, show_type, notes FROM venues WHERE id=%s;", (venue_id,))
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Venue not found"}), 404
-        return jsonify({"id": row[0], "name": row[1], "default_day": row[2], "default_time": row[3], "access_key": row[4]})
+        return jsonify({"id": row[0], "name": row[1], "default_day": row[2], "default_time": row[3], "access_key": row[4], "is_active": row[5], "default_host_id": row[6], "show_type": row[7], "notes": row[8]})
     finally:
         conn.close()
 
@@ -2767,19 +2780,21 @@ def admin_update_venue(vid):
     conn = getconn()
     try:
         cur = conn.cursor()
-        # Handle optional fields
         dday = data.get("default_day")
         dtime = data.get("default_time")
         akey = data.get("access_key")
+        default_host_id = data.get("default_host_id") if data.get("default_host_id") is not None else None
+        show_type = (data.get("show_type") or "gsp").strip()
+        notes = data.get("notes")
         
         # Default to True if not provided, allowing toggle off
         is_active = data.get("is_active", True) 
 
         cur.execute("""
             UPDATE venues 
-            SET name=%s, default_day=%s, default_time=%s, access_key=%s, is_active=%s
+            SET name=%s, default_day=%s, default_time=%s, access_key=%s, is_active=%s, default_host_id=%s, show_type=%s, notes=%s
             WHERE id=%s
-        """, (name, dday, dtime, akey, is_active, vid))
+        """, (name, dday, dtime, akey, is_active, default_host_id, show_type, notes, vid))
         conn.commit()
         return jsonify({"success": True})
     finally:
@@ -3139,17 +3154,17 @@ def admin_search_venues():
     try:
         cur = conn.cursor()
         if not q:
-            # Added is_active to selection
-            cur.execute("SELECT id, name, default_day, default_time, access_key, is_active FROM venues ORDER BY name LIMIT %s", (limit,))
+            # Added is_active, default_host_id, show_type, and notes to selection
+            cur.execute("SELECT id, name, default_day, default_time, access_key, is_active, default_host_id, show_type, notes FROM venues ORDER BY name LIMIT %s", (limit,))
         else:
             term = f"%{q}%"
-            # Added is_active to selection
+            # Added is_active, default_host_id, show_type, and notes to selection
             cur.execute("""
-                SELECT id, name, default_day, default_time, access_key, is_active
+                SELECT id, name, default_day, default_time, access_key, is_active, default_host_id, show_type, notes
                 FROM venues WHERE name ILIKE %s ORDER BY name LIMIT %s
             """, (term, limit))
         
-        # Map 6 columns now
+        # Map 9 columns now
         res = [
             {
                 "id": r[0], 
@@ -3157,7 +3172,10 @@ def admin_search_venues():
                 "default_day": r[2], 
                 "default_time": r[3], 
                 "access_key": r[4], 
-                "is_active": r[5]
+                "is_active": r[5],
+                "default_host_id": r[6],
+                "show_type": r[7],
+                "notes": r[8]
             } 
             for r in cur.fetchall()
         ]
@@ -3735,7 +3753,7 @@ def admin_weekly_report():
     try:
         cur = conn.cursor()
         query = """
-            SELECT v.id, v.name,
+            SELECT v.id, v.name, v.default_day,
                    COALESCE(json_agg(json_build_object(
                        'id', e.id, 
                        'event_date', e.event_date, 
@@ -3752,7 +3770,7 @@ def admin_weekly_report():
 
         rows = []
         for r in cur.fetchall():
-            vid, vname, events_json = r
+            vid, vname, v_default_day, events_json = r
             events = events_json or []
 
             if not events:
@@ -3767,6 +3785,7 @@ def admin_weekly_report():
             rows.append({
                 'venue_id': vid,
                 'venue': vname,
+                'default_day': v_default_day,
                 'events': events,
                 'state': state,
             })
@@ -4452,16 +4471,18 @@ def pub_venue_stats_secure(slug):
         cur = conn.cursor()
 
         # Fetch the specific venue by slug and verify its key.
-        cur.execute("SELECT id, name, default_day, default_time, access_key FROM venues;")
+        cur.execute("SELECT id, name, default_day, default_time, access_key, is_active, default_host_id FROM venues;")
         venues_raw = cur.fetchall()
 
         venue_info = None
-        for v_id, v_name, v_default_day, v_default_time, v_access_key in venues_raw:
+        for v in venues_raw:
+            (v_id, v_name, v_default_day, v_default_time, v_access_key, v_is_active, v_default_host_id) = v
             venue_slug_from_db = re.sub(r'[^a-z0-9]+', '-', (v_name or '').lower()).strip('-')
             if venue_slug_from_db == slug:
                 venue_info = {
                     "id": v_id, "name": v_name, "default_day": v_default_day,
-                    "default_time": v_default_time, "access_key": v_access_key
+                    "default_time": v_default_time, "access_key": v_access_key,
+                    "is_active": v_is_active, "default_host_id": v_default_host_id
                 }
                 break
 

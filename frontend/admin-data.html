@@ -31,6 +31,48 @@
       <p class="p">Search and edit Hosts, Venues, and Tournament Teams. Use the forms to create or update entries.</p>
     </section>
 
+    <!-- Weekly Schedule Builder (moved to top) -->
+    <section class="card section">
+      <h2 class="h2">Weekly Schedule Builder</h2>
+      <p class="p">Load active venues, edit their day/time/host for this week's schedule, and generate the text output. Host changes will update the venue's default host.</p>
+
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <button id="loadScheduleBtn" class="btn btn-primary">Load Active Venues</button>
+        <button id="generateScheduleBtn" class="btn btn-ghost">Generate Schedule Text</button>
+        <button id="saveHostChangesBtn" class="btn btn-primary">Save Host Changes</button>
+      </div>
+
+      <div id="scheduleBuilderContainer" style="margin-top:8px; overflow:auto; border:1px solid var(--border); padding:10px; border-radius:6px;">
+        <div style="color:var(--text-weak);">No data loaded. Click "Load Active Venues" to begin.</div>
+      </div>
+
+      <div style="margin-top:8px;">
+        <label for="scheduleBuilderOutput">Generated Schedule</label>
+        <textarea id="scheduleBuilderOutput" class="input" style="min-height:120px; white-space:pre-wrap;"></textarea>
+      </div>
+    </section>
+
+    <!-- Cancel Reason Modal (used by Schedule Builder) -->
+    <div id="cancelReasonModal" class="modal-backdrop" style="display:none; position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:9999; background: rgba(0,0,0,0.45);">
+      <div class="modal-content card" style="max-height:90vh; overflow:auto; width:760px;">
+        <div class="modal-header">
+          <h2 class="h2" id="cancelModalTitle">Cancel Venue</h2>
+          <button id="closeCancelModalBtn" class="btn btn-ghost">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="cancelModalStatus" class="status" style="display:none;"></div>
+          <div class="form-group">
+            <label for="cancelReasonText">Reason (optional)</label>
+            <textarea id="cancelReasonText" class="input" style="min-height:80px;"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveCancelReasonBtn" class="btn btn-primary">Save</button>
+          <button id="clearCancelReasonBtn" class="btn btn-ghost">Clear</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Weekly Post Report -->
     <section class="card section">
       <h2 class="h2">Weekly Post Report</h2>
@@ -146,6 +188,13 @@
               <input type="checkbox" id="venueIsActive" checked>
               Active Venue (Show in reports and lists)
             </label>
+        </div>
+        <div class="form-group">
+          <label for="venueDefaultHost">Default Host</label>
+          <select id="venueDefaultHost" class="input">
+            <option value="">(no default host)</option>
+          </select>
+          <div class="help">Optional: preselect a host when creating events for this venue.</div>
         </div>
           <div class="form-group">
             <label for="accessKey">Access Key</label>

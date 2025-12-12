@@ -82,7 +82,11 @@ CREATE TABLE "venues" (
 	"name" text NOT NULL CONSTRAINT "venues_name_key" UNIQUE,
 	"default_day" text,
 	"default_time" text,
-	"access_key" text CONSTRAINT "venues_access_key_key" UNIQUE
+	"default_host_id" integer,
+	"show_type" text DEFAULT 'gsp',
+	"access_key" text CONSTRAINT "venues_access_key_key" UNIQUE,
+	"is_active" boolean DEFAULT true,
+	"notes" text
 );
 ALTER TABLE "event_parse_log" ADD CONSTRAINT "event_parse_log_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "events"("id") ON DELETE CASCADE;
 ALTER TABLE "event_participation" ADD CONSTRAINT "event_participation_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "events"("id") ON DELETE CASCADE;
@@ -113,3 +117,4 @@ CREATE UNIQUE INDEX "tournament_weeks_week_ending_key" ON "tournament_weeks" ("w
 CREATE UNIQUE INDEX "venues_access_key_key" ON "venues" ("access_key");
 CREATE UNIQUE INDEX "venues_name_key" ON "venues" ("name");
 CREATE UNIQUE INDEX "venues_pkey" ON "venues" ("id");
+ALTER TABLE "venues" ADD CONSTRAINT "venues_default_host_id_fkey" FOREIGN KEY ("default_host_id") REFERENCES "hosts"("id") ON DELETE SET NULL;

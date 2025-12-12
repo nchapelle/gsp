@@ -469,7 +469,25 @@
     }
 
     if (hostSel) hostSel.addEventListener("change", function () { applyRecentFilter("host change"); });
-    if (venueSel) venueSel.addEventListener("change", function () { updateLoadPhotosBtnVisibility(); applySmartDate("venue change"); applyRecentFilter("venue change"); });
+    if (venueSel) venueSel.addEventListener("change", function () { 
+      updateLoadPhotosBtnVisibility(); 
+      applySmartDate("venue change"); 
+      applyRecentFilter("venue change"); 
+      // Auto-populate show type based on venue's show_type
+      if (showTypeSel) {
+        var venueId = venueSel.value;
+        var venue = allVenues.find(v => String(v.id) === String(venueId));
+        if (venue && venue.show_type) {
+          // Normalize to lowercase to match dropdown values
+          var normalizedType = (venue.show_type || 'gsp').toLowerCase();
+          showTypeSel.value = normalizedType;
+          log("Auto-set show_type to:", normalizedType, "(from venue.show_type:", venue.show_type + ")");
+        } else {
+          // Default to gsp if no show_type
+          showTypeSel.value = 'gsp';
+        }
+      }
+    });
 
     if (submitButton) {
       submitButton.addEventListener("click", async function (evt) {
