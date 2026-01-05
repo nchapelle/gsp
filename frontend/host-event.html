@@ -22,8 +22,16 @@
       href="https://app.gspevents.com/assets/styles.css"
     />
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    
     <!-- Config first -->
     <script src="https://app.gspevents.com/assets/config.js"></script>
+    
+    <!-- Auth component -->
+    <script src="https://app.gspevents.com/assets/auth.js"></script>
+    
     <!-- Optional: client-side HEIC->JPEG (load before host-event.js for best coverage) -->
     <script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
     <!-- Page script -->
@@ -37,11 +45,13 @@
           class="logo"
           alt="GSP Events"
         />
-        <div class="header-right">Host Event</div>
+        <div class="header-right">
+          <div id="gspAuthContainer"></div>
+        </div>
       </div>
     </header>
 
-    <main class="container page">
+    <main class="container page gsp-protected-content" style="display: none;">
       <!-- Event details -->
       <section class="card">
         <h1 class="h1">Event Details</h1>

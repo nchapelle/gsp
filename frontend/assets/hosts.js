@@ -1,6 +1,29 @@
 /* assets/hosts.js */
-/* global CONFIG, GSP */
+/* global CONFIG, GSP, GSPAuth */
 (function () {
+  // Initialize authentication - require host or admin role
+  if (typeof GSPAuth !== 'undefined') {
+    GSPAuth.init({
+      requiredRoles: ['host', 'admin'],
+      requireAuth: true,
+      onAuthReady: function(user) {
+        if (user) {
+          console.log('[hosts] Auth ready, user:', user.email, 'role:', user.role, 'display_name:', user.display_name);
+          // Trigger form initialization after auth is ready
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+              initFormWhenReady();
+            });
+          } else {
+            initFormWhenReady();
+          }
+        }
+      }
+    });
+  } else {
+    console.error('[hosts] GSPAuth not loaded');
+  }
+
   // --- Start of Re-included Helper Functions ---
   function log() {
     var args = Array.prototype.slice.call(arguments);
@@ -442,7 +465,21 @@
           var priorShowType = showTypeSel && showTypeSel.value ? String(showTypeSel.value) : "gsp";
 
           hostSel.innerHTML = '<option value="">Select Host (required)</option>' + hosts.map(h => `<option value="${h.id}">${h.name}</option>`).join("");
-          if (priorHost) hostSel.value = priorHost;
+          
+          // Auto-select host if display_name matches a host name (only if no prior selection)
+          if (priorHost) {
+            hostSel.value = priorHost;
+          } else if (GSPAuth.currentUser && GSPAuth.currentUser.display_name) {
+            var matchingHost = hosts.find(h => 
+              h.name.toLowerCase() === GSPAuth.currentUser.display_name.toLowerCase()
+            );
+            if (matchingHost) {
+              hostSel.value = matchingHost.id;
+              log('Auto-selected host:', matchingHost.name, 'for user:', GSPAuth.currentUser.display_name);
+            } else {
+              log('No matching host found for display name:', GSPAuth.currentUser.display_name);
+            }
+          }
 
           venueSel.innerHTML = '<option value="">Select Venue (required)</option>' + venues.map(v => `<option value="${v.id}">${v.name}</option>`).join("");
           if (priorVenue) venueSel.value = priorVenue;
@@ -640,9 +677,14 @@
 
       function closePhotoModal() {
         if (photoZipModal) photoZipModal.style.display = 'none';
-        if (photoZipModalPacks) photoZipModalPacks.innerHTML = '';
-        if (photoZipModalStatus) GSP.clearStatus(photoZipModalStatus);
-      }
+  });
+  
+  // Wrapper to ensure initForm is defined before calling it
+  function initFormWhenReady() {
+    if (typeof initForm === 'function') {
+      initForm();
+    }
+  } }
 
       // Attach the close handler only to an enabled control.
       if (closeModalBtn && !closeModalBtn.disabled) closeModalBtn.addEventListener('click', closePhotoModal);

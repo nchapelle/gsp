@@ -36,6 +36,8 @@ from werkzeug.exceptions import RequestEntityTooLarge
 import concurrent.futures
 
 from google.cloud import storage
+import firebase_admin
+from firebase_admin import credentials, auth as firebase_auth
 
 from pdfminer.high_level import extract_text
 from pypdf import PdfReader
@@ -71,26 +73,276 @@ PUBLIC_BASE = os.getenv("PUBLIC_BASE", "https://app.gspevents.com")
 
 storage_client = storage.Client()
 
+# Initialize Firebase Admin (uses Application Default Credentials)
+try:
+    firebase_admin.initialize_app()
+    logger.info("Firebase Admin initialized successfully")
+except Exception as e:
+    logger.warning(f"Firebase Admin init failed (will rely on legacy token): {e}")
+
 # ------------------------------------------------------------------------------
-# Optional token gate (disable by leaving HOST_API_TOKEN unset)
+# Authentication (Firebase + Legacy Token for migration through Jan 31, 2026)
 # ------------------------------------------------------------------------------
 HOST_TOKEN = os.getenv("HOST_API_TOKEN")
+MIGRATION_END_DATE = datetime(2026, 2, 1)  # Remove legacy token support after Jan 31
 
-def require_host_token():
-    if not HOST_TOKEN:
-        return True
-    tok = request.headers.get("X-GSP-Token") or request.args.get("t")
-    return tok == HOST_TOKEN
+def get_authenticated_user():
+    """
+    Returns dict with user info or None if unauthorized.
+    Supports dual authentication during migration:
+      1. Firebase ID token (preferred)
+      2. Legacy HOST_API_TOKEN (until Feb 1, 2026)
+    
+    Returns:
+        dict: {"id": int, "email": str, "role": str, "firebase_uid": str} or None
+    """
+    # Try Firebase authentication first
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            decoded = firebase_auth.verify_id_token(token)
+            firebase_uid = decoded['uid']
+            email = decoded.get('email')
+            
+            if not email:
+                logger.warning(f"Firebase token missing email: {firebase_uid}")
+                return None
+            
+            # Get or create user in database
+            user = ensure_user_exists(
+                firebase_uid=firebase_uid,
+                email=email,
+                display_name=decoded.get('name'),
+                photo_url=decoded.get('picture')
+            )
+            
+            if not user:
+                logger.error(f"ensure_user_exists returned None for {email}")
+                return None
+                
+            if not user.get('is_active'):
+                logger.warning(f"User inactive: {email}")
+                return None
+            
+            # Log activity
+            log_user_activity(
+                user_id=user['id'],
+                action='auth_success',
+                resource_type='session'
+            )
+            
+            return user
+            
+        except Exception as e:
+            logger.warning(f"Firebase auth failed: {e}")
+            # Fall through to legacy token check
+    
+    # Legacy token support (during migration period)
+    if datetime.now() < MIGRATION_END_DATE and HOST_TOKEN:
+        legacy_tok = request.headers.get("X-GSP-Token") or request.args.get("t")
+        if legacy_tok == HOST_TOKEN:
+            logger.info("Using legacy token authentication")
+            return {
+                "id": None,
+                "email": "legacy_token@gspevents.com",
+                "role": "host",
+                "firebase_uid": None,
+                "is_legacy": True
+            }
+    
+    return None
+
+def require_auth(required_roles=None):
+    """
+    Decorator to require authentication and optional role check.
+    
+    Args:
+        required_roles: list of allowed roles ['admin', 'host', 'smm'] or None for any authenticated user
+    
+    Sets request.user with user info if successful.
+    """
+    user = get_authenticated_user()
+    
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+    
+    # Store user in request context
+    request.user = user
+    
+    # Check role if specified
+    if required_roles and user.get('role') not in required_roles:
+        logger.warning(f"Role check failed: {user.get('email')} has role {user.get('role')}, needs {required_roles}")
+        return jsonify({"error": "forbidden", "message": "Insufficient permissions"}), 403
+    
+    return None  # Success
+
+def ensure_user_exists(firebase_uid, email, display_name=None, photo_url=None):
+    """
+    Get or create user in database. Updates last_login and profile info.
+    On creation, tries to split full_name into first/last name.
+    
+    Returns:
+        dict: User record or None if error
+    """
+    conn = None
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        # Check if user exists
+        cur.execute("""
+            SELECT id, firebase_uid, email, first_name, last_name, display_name, full_name, 
+                   photo_url, role, is_active, host_id
+            FROM users
+            WHERE firebase_uid = %s OR email = %s
+        """, (firebase_uid, email))
+        
+        row = cur.fetchone()
+        
+        if row:
+            # Update existing user - preserve their chosen display_name, update full_name if missing
+            user_id = row[0]
+            cur.execute("""
+                UPDATE users 
+                SET firebase_uid = %s,
+                    email = %s,
+                    full_name = COALESCE(full_name, %s),
+                    photo_url = COALESCE(%s, photo_url),
+                    last_login = now()
+                WHERE id = %s
+                RETURNING id, firebase_uid, email, first_name, last_name, display_name, 
+                          full_name, role, is_active, host_id
+            """, (firebase_uid, email, display_name, photo_url, user_id))
+            
+            updated = cur.fetchone()
+            conn.commit()
+            
+            return {
+                "id": updated[0],
+                "firebase_uid": updated[1],
+                "email": updated[2],
+                "first_name": updated[3],
+                "last_name": updated[4],
+                "display_name": updated[5],
+                "full_name": updated[6],
+                "role": updated[7],
+                "is_active": updated[8],
+                "host_id": updated[9]
+            }
+        else:
+            # Create new user - try to split name into first/last
+            first_name = None
+            last_name = None
+            if display_name:
+                name_parts = display_name.strip().split(None, 1)  # Split on first space
+                first_name = name_parts[0] if len(name_parts) > 0 else None
+                last_name = name_parts[1] if len(name_parts) > 1 else None
+            
+            cur.execute("""
+                INSERT INTO users (firebase_uid, email, first_name, last_name, display_name, 
+                                   full_name, photo_url, role, is_active, last_login)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'host', true, now())
+                RETURNING id, firebase_uid, email, first_name, last_name, display_name, 
+                          full_name, role, is_active, host_id
+            """, (firebase_uid, email, first_name, last_name, display_name, display_name, photo_url))
+            
+            new_user = cur.fetchone()
+            conn.commit()
+            
+            logger.info(f"Created new user: {email} with role 'host'")
+            
+            return {
+                "id": new_user[0],
+                "firebase_uid": new_user[1],
+                "email": new_user[2],
+                "first_name": new_user[3],
+                "last_name": new_user[4],
+                "display_name": new_user[5],
+                "full_name": new_user[6],
+                "role": new_user[7],
+                "is_active": new_user[8],
+                "host_id": new_user[9]
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in ensure_user_exists: {e}")
+        if conn:
+            conn.rollback()
+        return None
+    finally:
+        if conn:
+            try:
+                cur.close()
+                conn.close()
+            except:
+                pass
+
+def log_user_activity(user_id, action, resource_type=None, resource_id=None):
+    """
+    Log user activity for audit trail (non-blocking).
+    """
+    if not user_id:
+        return
+    
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        user_agent = request.headers.get('User-Agent', '')[:500]  # Truncate
+        
+        cur.execute("""
+            INSERT INTO user_activity_log (user_id, action, resource_type, resource_id, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, action, resource_type, resource_id, ip_address, user_agent))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to log activity: {e}")
 
 @app.before_request
 def _gate():
-    protected = (
-        request.path.startswith("/generate-upload-url")
-        or request.path.startswith("/create-event")
-        or (request.path.startswith("/events/") and request.path.endswith("/add-photo"))
-    )
-    if protected and not require_host_token():
-        return jsonify({"error": "unauthorized"}), 401
+    """Check authentication for protected endpoints."""
+    # CRITICAL: Allow OPTIONS requests for CORS preflight
+    if request.method == 'OPTIONS':
+        return None
+    
+    path = request.path
+    
+    # Public endpoints (no auth required)
+    public_endpoints = [
+        '/health', '/doctor', '/migrate',
+        '/events', '/venues', '/hosts',  # Public read endpoints
+        '/tournament/',  # Public tournament data
+        '/public-events'  # Public events listing
+    ]
+    
+    # Check if path starts with any public endpoint
+    is_public = any(path.startswith(ep) for ep in public_endpoints)
+    if is_public and request.method == 'GET':
+        return None
+    
+    # Protected endpoints - require authentication
+    protected_patterns = [
+        '/generate-upload-url',
+        '/create-event',
+        '/events/',  # Any POST/PUT/DELETE on events
+        '/admin/',
+        '/api/user',
+        '/api/users'
+    ]
+    
+    is_protected = any(path.startswith(p) for p in protected_patterns)
+    
+    if is_protected:
+        auth_error = require_auth()
+        if auth_error:
+            return auth_error
+    
+    return None
 
 # ------------------------------------------------------------------------------
 # Runtime SA diagnostics helper
@@ -1267,6 +1519,44 @@ def migrate():
               email TEXT
             );
         """)
+        
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+              id SERIAL PRIMARY KEY,
+              firebase_uid TEXT UNIQUE,
+              email TEXT UNIQUE NOT NULL,
+              first_name TEXT,
+              last_name TEXT,
+              display_name TEXT,
+              full_name TEXT,
+              photo_url TEXT,
+              role TEXT NOT NULL DEFAULT 'host' CHECK (role IN ('admin', 'host', 'smm')),
+              is_active BOOLEAN DEFAULT TRUE,
+              host_id INTEGER REFERENCES hosts(id) ON DELETE SET NULL,
+              created_at TIMESTAMP DEFAULT now(),
+              last_login TIMESTAMP,
+              created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+              notes TEXT
+            );
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_host_id ON users(host_id);")
+        
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_activity_log (
+              id SERIAL PRIMARY KEY,
+              user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+              action TEXT NOT NULL,
+              resource_type TEXT,
+              resource_id INTEGER,
+              ip_address TEXT,
+              user_agent TEXT,
+              created_at TIMESTAMP DEFAULT now()
+            );
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_activity_user_created ON user_activity_log(user_id, created_at DESC);")
+        
         cur.execute("""
             CREATE TABLE IF NOT EXISTS venues (
               id SERIAL PRIMARY KEY,
@@ -1748,37 +2038,53 @@ def create_event():
                 cur.execute("INSERT INTO venues (name) VALUES (%s) RETURNING id", (venue_name,))
                 venue_id = cur.fetchone()[0]
 
-        # REVISED INSERT/UPDATE: Include show_type
+        # Get user info for tracking (if authenticated)
+        user = getattr(request, 'user', None)
+        user_id = user.get('id') if user else None
+        user_email = user.get('email') if user else None
+        created_via = 'firebase' if (user and not user.get('is_legacy')) else 'legacy_token'
+
+        # REVISED INSERT/UPDATE: Include show_type and user tracking
         cur.execute(
             """
-            INSERT INTO events (host_id, venue_id, event_date, highlights, pdf_url, status, show_type)
-            VALUES (%s,%s,%s,%s,%s,'unposted',%s)
+            INSERT INTO events (
+                host_id, venue_id, event_date, highlights, pdf_url, status, show_type,
+                created_by_user_id, created_by_email, created_via
+            )
+            VALUES (%s,%s,%s,%s,%s,'unposted',%s,%s,%s,%s)
             ON CONFLICT (venue_id, event_date)
             DO UPDATE SET
               host_id = EXCLUDED.host_id,
               highlights = COALESCE(NULLIF(EXCLUDED.highlights, ''), events.highlights),
               pdf_url = COALESCE(NULLIF(EXCLUDED.pdf_url, ''), events.pdf_url),
-              show_type = EXCLUDED.show_type -- NEW: Update show_type on conflict
+              show_type = EXCLUDED.show_type,
+              last_modified_by_user_id = EXCLUDED.created_by_user_id,
+              last_modified_at = now()
             RETURNING id;
             """,
-            (host_id, venue_id, event_date, highlights, pdf_url, show_type),
+            (host_id, venue_id, event_date, highlights, pdf_url, show_type, user_id, user_email, created_via),
         )
         event_id = cur.fetchone()[0]
 
         for url in set(photo_urls):
             cur.execute(
                 """
-                INSERT INTO event_photos (event_id, photo_url)
-                SELECT %s, %s
+                INSERT INTO event_photos (event_id, photo_url, uploaded_by_user_id)
+                SELECT %s, %s, %s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM event_photos WHERE event_id=%s AND photo_url=%s
                 );
                 """,
-                (event_id, url, event_id, url),
+                (event_id, url, user_id, event_id, url),
             )
 
         conn.commit()
-        logger.info("Event created id=%s pdf=%s photos=%s show_type=%s", event_id, bool(pdf_url), len(photo_urls), show_type)
+        logger.info("Event created id=%s pdf=%s photos=%s show_type=%s by_user=%s", 
+                   event_id, bool(pdf_url), len(photo_urls), show_type, user_email or 'legacy')
+
+        # Log activity
+        if user_id:
+            log_user_activity(user_id, 'create_event', 'event', event_id)
 
         try:
             if pdf_url:
@@ -2096,17 +2402,26 @@ def add_photo_to_event(eid):
 
         public_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{key}"
 
+        # Get user info for tracking
+        user = getattr(request, 'user', None)
+        user_id = user.get('id') if user else None
+
         # Record in DB
         cur.execute(
-            "INSERT INTO event_photos (event_id, photo_url) VALUES (%s, %s) RETURNING id;",
-            (eid, public_url),
+            "INSERT INTO event_photos (event_id, photo_url, uploaded_by_user_id) VALUES (%s, %s, %s) RETURNING id;",
+            (eid, public_url, user_id),
         )
         photo_db_id = cur.fetchone()[0]
         conn.commit()
+        
+        # Log activity
+        if user_id:
+            log_user_activity(user_id, 'upload_photo', 'event', eid)
+        
         cur.close()
         conn.close()
 
-        logger.info("[upload.photo] ok event=%s key=%s raw=%s", eid, key, is_raw)
+        logger.info("[upload.photo] ok event=%s key=%s raw=%s by_user=%s", eid, key, is_raw, user.get('email') if user else 'legacy')
         return jsonify({"status": "ok", "photoId": photo_db_id, "photoUrl": public_url}), 200
 
     except Exception as e:
@@ -2133,12 +2448,21 @@ def add_photo_by_url(eid):
         if not cur.fetchone():
             return jsonify({"error": "event not found"}), 404
 
+        # Get user info for tracking
+        user = getattr(request, 'user', None)
+        user_id = user.get('id') if user else None
+
         cur.execute(
-            "INSERT INTO event_photos (event_id, photo_url) VALUES (%s, %s) RETURNING id;",
-            (eid, url),
+            "INSERT INTO event_photos (event_id, photo_url, uploaded_by_user_id) VALUES (%s, %s, %s) RETURNING id;",
+            (eid, url, user_id),
         )
         pid = cur.fetchone()[0]
         conn.commit()
+        
+        # Log activity
+        if user_id:
+            log_user_activity(user_id, 'add_photo_url', 'event', eid)
+        
         return jsonify({"status": "ok", "photoId": pid, "photoUrl": url})
     except Exception as e:
         conn.rollback()
@@ -4535,6 +4859,266 @@ def pub_venue_stats_secure(slug):
     finally:
         if conn:
             conn.close()
+
+# ------------------------------------------------------------------------------
+# User Management Endpoints
+# ------------------------------------------------------------------------------
+
+@app.route("/api/user/me", methods=["GET"])
+def get_current_user():
+    """Get current authenticated user's profile."""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user = request.user
+    
+    # Don't expose sensitive data
+    return jsonify({
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "first_name": user.get("first_name"),
+        "last_name": user.get("last_name"),
+        "display_name": user.get("display_name"),
+        "role": user.get("role"),
+        "is_legacy": user.get("is_legacy", False)
+    })
+
+@app.route("/api/user/me", methods=["PUT"])
+def update_current_user():
+    """Update current user's profile (first_name, last_name, display_name)."""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user = request.user
+    if user.get("is_legacy"):
+        return jsonify({"error": "Cannot update legacy token user"}), 400
+    
+    data = request.get_json() or {}
+    first_name = data.get("first_name", "").strip()
+    last_name = data.get("last_name", "").strip()
+    display_name = data.get("display_name", "").strip()
+    
+    if not display_name:
+        return jsonify({"error": "display_name required"}), 400
+    
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            UPDATE users
+            SET first_name = %s, last_name = %s, display_name = %s
+            WHERE id = %s
+            RETURNING id, email, first_name, last_name, display_name, role
+        """, (first_name, last_name, display_name, user["id"]))
+        
+        updated = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        if not updated:
+            return jsonify({"error": "User not found"}), 404
+        
+        log_user_activity(user["id"], "update_profile", "user", user["id"])
+        
+        return jsonify({
+            "id": updated[0],
+            "email": updated[1],
+            "first_name": updated[2],
+            "last_name": updated[3],
+            "display_name": updated[4],
+            "role": updated[5]
+        })
+        
+    except Exception as e:
+        logger.exception("update_current_user failed")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    """List all users (admin only)."""
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT u.id, u.firebase_uid, u.email, u.first_name, u.last_name, u.display_name, 
+                   u.role, u.is_active, u.host_id, h.name as host_name,
+                   u.created_at, u.last_login
+            FROM users u
+            LEFT JOIN hosts h ON u.host_id = h.id
+            ORDER BY u.created_at DESC
+        """)
+        
+        users = []
+        for row in cur.fetchall():
+            users.append({
+                "id": row[0],
+                "firebase_uid": row[1],
+                "email": row[2],
+                "first_name": row[3],
+                "last_name": row[4],
+                "display_name": row[5],
+                "role": row[6],
+                "is_active": row[7],
+                "host_id": row[8],
+                "host_name": row[9],
+                "created_at": row[10].isoformat() if row[10] else None,
+                "last_login": row[11].isoformat() if row[11] else None
+            })
+        
+        cur.close()
+        conn.close()
+        
+        log_user_activity(request.user["id"], "list_users", "users")
+        
+        return jsonify({"users": users})
+        
+    except Exception as e:
+        logger.exception("list_users failed")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    """Update user (admin only)."""
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
+    data = request.get_json() or {}
+    
+    # Validate inputs
+    role = data.get("role")
+    is_active = data.get("is_active")
+    first_name = data.get("first_name")
+    last_name = data.get("last_name")
+    host_id = data.get("host_id")
+    
+    if role and role not in ['admin', 'host', 'smm']:
+        return jsonify({"error": "Invalid role. Must be admin, host, or smm"}), 400
+    
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        # Build dynamic update query
+        updates = []
+        params = []
+        
+        if role is not None:
+            updates.append("role = %s")
+            params.append(role)
+        
+        if is_active is not None:
+            updates.append("is_active = %s")
+            params.append(is_active)
+        
+        if first_name is not None:
+            updates.append("first_name = %s")
+            params.append(first_name)
+        
+        if last_name is not None:
+            updates.append("last_name = %s")
+            params.append(last_name)
+        
+        if host_id is not None:
+            updates.append("host_id = %s")
+            params.append(host_id if host_id else None)
+        
+        if not updates:
+            return jsonify({"error": "No updates provided"}), 400
+        
+        params.append(user_id)
+        
+        query = f"""
+            UPDATE users
+            SET {', '.join(updates)}
+            WHERE id = %s
+            RETURNING id, email, first_name, last_name, display_name, role, is_active, host_id
+        """
+        
+        cur.execute(query, params)
+        updated = cur.fetchone()
+        
+        if not updated:
+            conn.close()
+            return jsonify({"error": "User not found"}), 404
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        log_user_activity(request.user["id"], "update_user", "user", user_id)
+        
+        return jsonify({
+            "id": updated[0],
+            "email": updated[1],
+            "first_name": updated[2],
+            "last_name": updated[3],
+            "display_name": updated[4],
+            "role": updated[5],
+            "is_active": updated[6],
+            "host_id": updated[7]
+        })
+        
+    except Exception as e:
+        logger.exception(f"update_user {user_id} failed")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/users/activity", methods=["GET"])
+def get_user_activity():
+    """Get user activity log (admin only)."""
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
+    limit = request.args.get("limit", 100, type=int)
+    limit = min(limit, 500)  # Cap at 500
+    
+    try:
+        conn = getconn()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT 
+                ual.id, ual.user_id, u.email, ual.action, 
+                ual.resource_type, ual.resource_id, 
+                ual.ip_address, ual.created_at
+            FROM user_activity_log ual
+            LEFT JOIN users u ON ual.user_id = u.id
+            ORDER BY ual.created_at DESC
+            LIMIT %s
+        """, (limit,))
+        
+        activities = []
+        for row in cur.fetchall():
+            activities.append({
+                "id": row[0],
+                "user_id": row[1],
+                "email": row[2],
+                "action": row[3],
+                "resource_type": row[4],
+                "resource_id": row[5],
+                "ip_address": row[6],
+                "created_at": row[7].isoformat() if row[7] else None
+            })
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({"activities": activities, "limit": limit})
+        
+    except Exception as e:
+        logger.exception("get_user_activity failed")
+        return jsonify({"error": str(e)}), 500
+
 # ------------------------------------------------------------------------------
 # Entrypoint 
 # ------------------------------------------------------------------------------

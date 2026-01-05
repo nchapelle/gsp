@@ -415,3 +415,115 @@ button[type="submit"]:disabled, button[type="button"]:disabled {
   color: var(--text-weak);
 }
 .report-meta strong { color: var(--text-strong); }
+
+/* ============================================================================
+   GSP Auth UI Styles
+   ============================================================================ */
+
+/* Auth container in header */
+.gsp-auth-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.gsp-auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--yellow);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.gsp-auth-email {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.gsp-auth-role {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-admin {
+  background: var(--red);
+  color: white;
+}
+
+.badge-host {
+  background: var(--blue);
+  color: white;
+}
+
+.badge-smm {
+  background: var(--teal);
+  color: white;
+}
+
+/* Sign in UI */
+.gsp-auth-signin {
+  text-align: center;
+  padding: 20px;
+}
+
+.gsp-auth-signin p {
+  margin-bottom: 16px;
+  color: var(--text-weak);
+  font-size: 14px;
+}
+
+/* Google Sign-In button styling */
+#gspSignInBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  color: #3c4043;
+  padding: 12px 24px;
+  border-radius: 4px;
+  border: 1px solid #dadce0;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+#gspSignInBtn:hover {
+  background: #f8f9fa;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+#gspSignInBtn:active {
+  background: #e8eaed;
+}
+
+/* Protected content - hidden until auth ready */
+.gsp-protected-content {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.gsp-protected-content[style*="display: block"],
+.gsp-protected-content[style=""] {
+  opacity: 1;
+}

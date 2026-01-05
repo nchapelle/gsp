@@ -1,8 +1,24 @@
 /* assets/admin-data.js */
-/* global CONFIG, GSP */
+/* global CONFIG, GSP, GSPAuth */
 (function () {
   const API = CONFIG.API_BASE_URL;
   let hostsCache = [];
+
+  // Initialize authentication - require admin role only
+  if (typeof GSPAuth !== 'undefined') {
+    GSPAuth.init({
+      requiredRoles: ['admin'],
+      requireAuth: true,
+      onAuthReady: function(user) {
+        if (user) {
+          console.log('[admin-data] Auth ready, user:', user.email, 'role:', user.role);
+          // Page will auto-initialize via DOMContentLoaded
+        }
+      }
+    });
+  } else {
+    console.error('[admin-data] GSPAuth not loaded');
+  }
 
   // ---------- Utilities ----------
   function debounce(fn, ms) {

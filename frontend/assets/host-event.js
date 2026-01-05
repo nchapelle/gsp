@@ -1,6 +1,23 @@
 /* assets/host-event.js */
-/* global CONFIG */
+/* global CONFIG, GSPAuth */
 (function () {
+  // Initialize authentication - require host or admin role
+  if (typeof GSPAuth !== 'undefined') {
+    GSPAuth.init({
+      requiredRoles: ['host', 'admin'],
+      requireAuth: true,
+      onAuthReady: function(user) {
+        if (user) {
+          console.log('[host-event] Auth ready, user:', user.email, 'role:', user.role);
+          initPage();
+        }
+      }
+    });
+  } else {
+    console.error('[host-event] GSPAuth not loaded');
+    document.body.innerHTML = '<div style="padding: 40px; text-align: center;">Authentication system not available</div>';
+  }
+
   function getEl(id) {
     return document.getElementById(id);
   }
@@ -174,7 +191,7 @@
     return res.json();
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
+  function initPage() {
     var details = getEl("event-details-content");
     if (!details) return; // not this page
 
@@ -303,5 +320,5 @@
         loadEvent(eventId, els).catch(function () {});
       });
     }
-  });
+  }
 })();

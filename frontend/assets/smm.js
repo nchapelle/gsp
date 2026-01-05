@@ -1,4 +1,22 @@
 // assets/smm.js (global, safe to load from header)
+/* global GSPAuth */
+
+// Initialize authentication - require SMM or admin role
+if (typeof GSPAuth !== 'undefined') {
+  GSPAuth.init({
+    requiredRoles: ['smm', 'admin'],
+    requireAuth: true,
+    onAuthReady: function(user) {
+      if (user) {
+        console.log('[smm] Auth ready, user:', user.email, 'role:', user.role);
+        // Page will auto-initialize via DOMContentLoaded
+      }
+    }
+  });
+} else {
+  console.error('[smm] GSPAuth not loaded');
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const grid = document.getElementById('list');
   const search = document.getElementById('searchInput');

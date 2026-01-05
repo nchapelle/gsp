@@ -7,6 +7,8 @@
       "**/node_modules/**"
     ],
   "rewrites": [
+      { "source": "/", "destination": "/index.html" },
+      { "source": "/index", "destination": "/index.html" },
       { "source": "/hosts", "destination": "/hosts.html" },
       { "source": "/host/event", "destination": "/host-event.html" },
 

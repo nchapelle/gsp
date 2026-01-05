@@ -1,7 +1,23 @@
 // assets/smm-event.js
-/* global CONFIG, GSP */
+/* global CONFIG, GSP, GSPAuth */
 
 (function () {
+  // Initialize authentication - require SMM or admin role
+  if (typeof GSPAuth !== 'undefined') {
+    GSPAuth.init({
+      requiredRoles: ['smm', 'admin'],
+      requireAuth: true,
+      onAuthReady: function(user) {
+        if (user) {
+          console.log('[smm-event] Auth ready, user:', user.email, 'role:', user.role);
+          // Page will auto-initialize via DOMContentLoaded
+        }
+      }
+    });
+  } else {
+    console.error('[smm-event] GSPAuth not loaded');
+  }
+
   // Aliases for global helpers exposed by main.js
   const j = GSP.j;
   const status = GSP.status;

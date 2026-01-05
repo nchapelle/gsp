@@ -1,6 +1,22 @@
 (function () {
   const API = CONFIG.API_BASE_URL;
 
+  // Initialize authentication - require admin role only
+  if (typeof GSPAuth !== 'undefined') {
+    GSPAuth.init({
+      requiredRoles: ['admin'],
+      requireAuth: true,
+      onAuthReady: function(user) {
+        if (user) {
+          console.log('[admin] Auth ready, user:', user.email, 'role:', user.role);
+          // Page will auto-initialize via DOMContentLoaded
+        }
+      }
+    });
+  } else {
+    console.error('[admin] GSPAuth not loaded');
+  }
+
   // --- Internal Module Helpers (No DOM access, No GSP/CONFIG calls here) ---
   function badgeShowType(st) {
     const s = (st || "gsp").toLowerCase();

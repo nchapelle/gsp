@@ -5,6 +5,7 @@ flask_cors==4.0.0
 google-cloud-storage==2.10.0
 google-auth==2.33.0
 google-api-core==2.19.2
+firebase-admin==6.4.0
 requests==2.32.3
 
 pdfminer.six==20231228

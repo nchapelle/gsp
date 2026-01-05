@@ -11,51 +11,260 @@
   <!-- CRITICAL: Link to your styles.css -->
   <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
 
-  <!-- Global JavaScript (if any) -->
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+
+  <!-- Global JavaScript -->
   <script src="https://app.gspevents.com/assets/config.js"></script>
-  <!-- NOTE: If you have a separate main.js, link it here. If not, omit. -->
-  <!-- <script src="https://app.gspevents.com/assets/main.js"></script> -->
+  <script src="https://app.gspevents.com/assets/auth.js"></script>
+  <script src="https://app.gspevents.com/assets/main.js"></script>
 </head>
 <body>
   <header class="header">
     <div class="header-inner">
       <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
-      <div class="header-right">GSP Events Portal</div>
+      <div class="header-right">
+        <div id="gspAuthContainer"></div>
+      </div>
     </div>
   </header>
 
   <main class="container page">
-    <!-- Hero Section -->
-    <section class="card">
+    <!-- Sign In Section (shown when not authenticated) -->
+    <section id="signInSection" class="card" style="display: none; text-align: center; padding: 60px 40px;">
       <h1 class="h1" style="margin-top: 0;">Gather • Socialize • Play</h1>
-      <p class="p" style="margin-bottom: var(--space-3);">
-        The official Game Show Palooza portal. Create events, manage teams, review content, and publish social‑ready recaps.
+      <p class="p" style="margin-bottom: var(--space-5); font-size: 18px; color: var(--text-weak);">
+        The official Game Show Palooza portal for hosts, social media managers, and administrators.
       </p>
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <span class="badge posted">Live</span>
+      <div style="margin: 40px 0;">
+        <button id="mainSignInBtn" class="btn btn-primary" style="font-size: 18px; padding: 16px 32px;">
+          <svg width="20" height="20" style="vertical-align: middle; margin-right: 10px;">
+            <path fill="currentColor" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+            <path fill="currentColor" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+            <path fill="currentColor" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="currentColor" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          Sign in with Google
+        </button>
       </div>
+      <p class="p" style="color: var(--muted); font-size: 14px;">
+        Sign in to access your portal
+      </p>
     </section>
 
-    <!-- Action Cards Section -->
-    <section class="grid grid-2 section">
+    <!-- Dashboard Section (shown when authenticated) -->
+    <section id="dashboardSection" style="display: none;">
+      <!-- Profile Edit Card -->
       <div class="card">
-        <h2 class="h2">Hosts</h2>
-        <p class="p">Create events, upload PDF recaps and photos, and edit highlights.</p>
-        <a class="btn btn-primary" href="/hosts">Open Host Portal</a>
+        <h2 class="h2">My Profile</h2>
+        <form id="profileForm" style="max-width: 500px;">
+          <div class="form-group">
+            <label for="profileEmail">Email (cannot be changed):</label>
+            <input type="email" id="profileEmail" class="input" disabled />
+          </div>
+          <div class="form-group">
+            <label for="profileFirstName">First Name:</label>
+            <input type="text" id="profileFirstName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="profileLastName">Last Name:</label>
+            <input type="text" id="profileLastName" class="input" />
+          </div>
+          <div class="form-group">
+            <label for="profileDisplayName">Display Name (public nickname):</label>
+            <input type="text" id="profileDisplayName" class="input" required />
+          </div>
+          <div id="profileStatus" class="status" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary">Update Profile</button>
+        </form>
+      </div>
+      
+      <!-- Hero Section -->
+      <div class="card">
+        <h1 class="h1" style="margin-top: 0;">Welcome to GSP Events</h1>
+        <p class="p" style="margin-bottom: var(--space-3);">
+          Select your portal below to get started.
+        </p>
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <span id="userRoleBadge" class="badge"></span>
+          <span id="userEmailDisplay" style="color: var(--text-weak); font-size: 14px;"></span>
+        </div>
       </div>
 
-      <div class="card">
-        <h2 class="h2">Social Media Managers</h2>
-        <p class="p">Review content, add a Facebook Event URL, and mark events posted.</p>
-        <a class="btn btn-primary" href="/smm">Open SMM Dashboard</a>
-      </div>
+      <!-- Action Cards Section -->
+      <div class="grid grid-2 section">
+        <div class="card" id="hostCard" style="display: none;">
+          <h2 class="h2">Host Portal</h2>
+          <p class="p">Create events, upload PDF recaps and photos, and edit highlights.</p>
+          <a class="btn btn-primary" href="/hosts.html">Open Host Portal</a>
+        </div>
 
-      <div class="card">
-        <h2 class="h2">Tournament Teams</h2>
-        <p class="p">Manage tournament teams, captains, and home bars.</p>
-        <a class="btn btn-primary" href="teams.html">Manage Teams</a>
+        <div class="card" id="smmCard" style="display: none;">
+          <h2 class="h2">Social Media Manager</h2>
+          <p class="p">Review content, add a Facebook Event URL, and mark events posted.</p>
+          <a class="btn btn-primary" href="/smm.html">Open SMM Dashboard</a>
+        </div>
+
+        <div class="card" id="adminCard" style="display: none;">
+          <h2 class="h2">Admin Portal</h2>
+          <p class="p">Manage events, users, and all system data.</p>
+          <a class="btn btn-primary" href="/admin.html">Open Admin Portal</a>
+        </div>
+
+        <div class="card" id="adminDataCard" style="display: none;">
+          <h2 class="h2">Data Management</h2>
+          <p class="p">Manage hosts, venues, and tournament data.</p>
+          <a class="btn btn-primary" href="/admin-data.html">Open Data Manager</a>
+        </div>
+
+        <div class="card">
+          <h2 class="h2">Public Events</h2>
+          <p class="p">View all published GSP events and tournament standings.</p>
+          <a class="btn btn-secondary" href="/public-events.html">View Public Events</a>
+        </div>
+
+        <div class="card">
+          <h2 class="h2">Tournament Teams</h2>
+          <p class="p">View tournament teams, captains, and standings.</p>
+          <a class="btn btn-secondary" href="/teams.html">View Teams</a>
+        </div>
       </div>
     </section>
   </main>
+
+  <script>
+    // Initialize auth for index page
+    if (typeof GSPAuth !== 'undefined') {
+      GSPAuth.init({
+        requireAuth: false, // Don't force login, just show different UI
+        onAuthReady: function(user) {
+          const signInSection = document.getElementById('signInSection');
+          const dashboardSection = document.getElementById('dashboardSection');
+          const mainSignInBtn = document.getElementById('mainSignInBtn');
+          
+          if (user) {
+            // User is signed in - show dashboard
+            signInSection.style.display = 'none';
+            dashboardSection.style.display = 'block';
+            
+            // Load profile form
+            const profileForm = document.getElementById('profileForm');
+            const profileEmail = document.getElementById('profileEmail');
+            const profileFirstName = document.getElementById('profileFirstName');
+            const profileLastName = document.getElementById('profileLastName');
+            const profileDisplayName = document.getElementById('profileDisplayName');
+            const profileStatus = document.getElementById('profileStatus');
+            
+            // Pre-fill profile data
+            console.log('[index] Pre-filling profile with user data:', user);
+            if (profileEmail) profileEmail.value = user.email || '';
+            if (profileFirstName) profileFirstName.value = user.first_name || '';
+            if (profileLastName) profileLastName.value = user.last_name || '';
+            if (profileDisplayName) profileDisplayName.value = user.display_name || '';
+            
+            // Handle profile form submission
+            if (profileForm) {
+              profileForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                if (!profileStatus) return;
+                
+                profileStatus.style.display = 'none';
+                
+                try {
+                  const updates = {
+                    first_name: profileFirstName.value.trim(),
+                    last_name: profileLastName.value.trim(),
+                    display_name: profileDisplayName.value.trim()
+                  };
+                  
+                  if (!updates.display_name) {
+                    profileStatus.className = 'status error';
+                    profileStatus.textContent = 'Display name is required';
+                    profileStatus.style.display = 'block';
+                    return;
+                  }
+                  
+                  await CONFIG.j(CONFIG.API_BASE_URL + '/api/user/me', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(updates)
+                  });
+                  
+                  profileStatus.className = 'status success';
+                  profileStatus.textContent = 'Profile updated successfully!';
+                  profileStatus.style.display = 'block';
+                  
+                  // Update GSPAuth cache
+                  if (GSPAuth.currentUser) {
+                    GSPAuth.currentUser.first_name = updates.first_name;
+                    GSPAuth.currentUser.last_name = updates.last_name;
+                    GSPAuth.currentUser.display_name = updates.display_name;
+                    GSPAuth.renderAuthUI(GSPAuth.currentUser);
+                  }
+                  
+                } catch (e) {
+                  console.error('Profile update failed:', e);
+                  profileStatus.className = 'status error';
+                  profileStatus.textContent = 'Failed to update profile: ' + (e.message || e);
+                  profileStatus.style.display = 'block';
+                }
+              });
+            }
+            
+            // Show user info
+            const roleDisplay = document.getElementById('userRoleBadge');
+            const emailDisplay = document.getElementById('userEmailDisplay');
+            
+            if (roleDisplay) {
+              roleDisplay.textContent = user.role.toUpperCase();
+              roleDisplay.className = `badge badge-${user.role}`;
+            }
+            
+            if (emailDisplay) {
+              emailDisplay.textContent = user.email;
+            }
+            
+            // Show appropriate cards based on role
+            const hostCard = document.getElementById('hostCard');
+            const smmCard = document.getElementById('smmCard');
+            const adminCard = document.getElementById('adminCard');
+            const adminDataCard = document.getElementById('adminDataCard');
+            
+            if (user.role === 'admin') {
+              // Admins see everything
+              if (hostCard) hostCard.style.display = 'block';
+              if (smmCard) smmCard.style.display = 'block';
+              if (adminCard) adminCard.style.display = 'block';
+              if (adminDataCard) adminDataCard.style.display = 'block';
+            } else if (user.role === 'host') {
+              // Hosts see host portal only
+              if (hostCard) hostCard.style.display = 'block';
+            } else if (user.role === 'smm') {
+              // SMMs see SMM portal only
+              if (smmCard) smmCard.style.display = 'block';
+            }
+            
+          } else {
+            // User is NOT signed in - show sign in prompt
+            signInSection.style.display = 'block';
+            dashboardSection.style.display = 'none';
+            
+            // Wire up sign in button
+            if (mainSignInBtn) {
+              mainSignInBtn.addEventListener('click', function() {
+                GSPAuth.signInWithGoogle();
+              });
+            }
+          }
+        }
+      });
+    } else {
+      // Fallback if auth not loaded
+      console.error('GSPAuth not loaded');
+      document.getElementById('signInSection').style.display = 'block';
+      document.getElementById('signInSection').innerHTML = '<p style="color: var(--red);">Authentication system not available</p>';
+    }
+  </script>
 </body>
 </html>
