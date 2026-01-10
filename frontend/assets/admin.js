@@ -125,6 +125,10 @@
     const params = new URLSearchParams(location.search);
     const eid = params.get('id');
     const statusEl = getEl('evtStatus');
+    const pdfStatusEl = getEl('pdfStatus');
+    const partsStatusEl = getEl('partsStatus');
+    const tourneyStatusEl = getEl('tourneyScoreStatus');
+    const photosStatusEl = getEl('photosStatus');
 
     if (!eid) {
       GSP.status(statusEl, 'error', 'Missing event id');
@@ -369,6 +373,10 @@
 
     async function load() {
       GSP.clearStatus(statusEl);
+      GSP.clearStatus(pdfStatusEl);
+      GSP.clearStatus(partsStatusEl);
+      GSP.clearStatus(tourneyStatusEl);
+      GSP.clearStatus(photosStatusEl);
       try {
         const e = await GSP.j(`${API}/admin/events/${eid}`);
         
@@ -417,7 +425,7 @@
               await GSP.j(`${API}/admin/events/${eid}/photos?photoUrl=${b.dataset.del}`, { method: 'DELETE' });
               b.parentElement.remove();
             } catch (err) {
-              GSP.status(statusEl, 'error', 'Remove failed: ' + err.message);
+              GSP.status(photosStatusEl, 'error', 'Remove failed: ' + err.message);
             }
           });
         });
@@ -440,8 +448,7 @@
     });
 
     getEl('savePartsBtn')?.addEventListener('click', async () => {
-      const statusEl = getEl('status');  // Assuming you have a status element
-      GSP.clearStatus(statusEl);
+      GSP.clearStatus(partsStatusEl);
       try {
         const rows = Array.from(getEl('partsContainer').querySelectorAll('.part-row')).map(div => ({
           position: parseInt(div.querySelector('.part-position')?.value, 10) || null,
@@ -458,17 +465,17 @@
         if (response.ai_recap) {
             const aiRecapEl = getEl('aiRecap');
             if (aiRecapEl) aiRecapEl.value = response.ai_recap;
-            GSP.status(statusEl, 'success', 'Rankings saved and AI recap updated.');
+            GSP.status(partsStatusEl, 'success', 'Rankings saved and AI recap updated.');
         } else {
-            GSP.status(statusEl, 'success', 'Rankings saved.');
+            GSP.status(partsStatusEl, 'success', 'Rankings saved.');
         }
 
       } catch (err) {
-        GSP.status(statusEl, 'error', 'Save failed: ' + err.message);
+        GSP.status(partsStatusEl, 'error', 'Save failed: ' + err.message);
       }
     });
 
-    getEl('saveBtn')?.addEventListener('click', async () => {
+    getEl('saveEventBtn')?.addEventListener('click', async () => {
       GSP.clearStatus(statusEl);
       try {
           const body = {
@@ -542,27 +549,27 @@
     });
 
     getEl('parseBtn')?.addEventListener('click', async () => {
-      GSP.clearStatus(statusEl);
-      GSP.status(statusEl, 'info', 'Parsing PDF and generating AI recap...');
+      GSP.clearStatus(pdfStatusEl);
+      GSP.status(pdfStatusEl, 'info', 'Parsing PDF and generating AI recap...');
       try {
         const response = await GSP.j(`${API}/events/${eid}/parse-pdf`, { method: 'POST' });
         if (response.status === 'success' && response.ai_recap_generated) {
           getEl('aiRecap').value = response.ai_recap_generated;
-          GSP.status(statusEl, 'success', 'Parse triggered and AI recap generated.');
+          GSP.status(pdfStatusEl, 'success', 'Parse triggered and AI recap generated.');
         } else {
-          GSP.status(statusEl, 'error', response.error || 'Parse triggered but no teams or AI recap found.');
+          GSP.status(pdfStatusEl, 'error', response.error || 'Parse triggered but no teams or AI recap found.');
         }
         load();
       } catch (err) {
-        GSP.status(statusEl, 'error', `Parse failed: ${err.message}`);
+        GSP.status(pdfStatusEl, 'error', `Parse failed: ${err.message}`);
       }
     });
     getEl('addPhotoUrlBtn')?.addEventListener('click', async () => {
-      GSP.clearStatus(statusEl);
+      GSP.clearStatus(photosStatusEl);
       const photoUrlInput = getEl('photoUrlInput');
       const u = (photoUrlInput.value || '').trim();
       if (!u) {
-        GSP.status(statusEl, 'error', 'Enter a photo URL.');
+        GSP.status(photosStatusEl, 'error', 'Enter a photo URL.');
         return;
       }
       try {
@@ -571,15 +578,15 @@
           body: JSON.stringify({ photoUrl: u })
         });
         photoUrlInput.value = '';
-        GSP.status(statusEl, 'success', 'Photo linked.');
+        GSP.status(photosStatusEl, 'success', 'Photo linked.');
         load();
       } catch (err) {
-        GSP.status(statusEl, 'error', 'Add photo failed: ' + err.message);
+        GSP.status(photosStatusEl, 'error', 'Add photo failed: ' + err.message);
       }
     });
 
     getEl('validateEventBtn')?.addEventListener('click', async () => {
-      GSP.clearStatus(statusEl);
+      GSP.clearStatus(pdfStatusEl);
       const validateBtn = getEl('validateEventBtn');
       const isCurrentlyValidated = validateBtn.textContent === 'Unvalidate Event';
       try {
@@ -587,19 +594,20 @@
           method: 'PUT',
           body: JSON.stringify({ is_validated: !isCurrentlyValidated }),
         });
-        GSP.status(statusEl, 'success', `Event ${!isCurrentlyValidated ? 'validated' : 'unvalidated'}.`);
+        GSP.status(pdfStatusEl, 'success', `Event ${!isCurrentlyValidated ? 'validated' : 'unvalidated'}.`);
         load();
       } catch (err) {
-        GSP.status(statusEl, 'error', 'Validation update failed: ' + err.message);
+        GSP.status(pdfStatusEl, 'error', 'Validation update failed: ' + err.message);
       }
     });
 
     getEl('viewPdfOriginalBtn')?.addEventListener('click', () => {
+      GSP.clearStatus(pdfStatusEl);
       const pdfUrl = getEl('pdfUrl').value;
       if (pdfUrl) {
         window.open(pdfUrl, '_blank');
       } else {
-        GSP.status(statusEl, 'error', 'No PDF URL available to view.');
+        GSP.status(pdfStatusEl, 'error', 'No PDF URL available to view.');
       }
     });
     

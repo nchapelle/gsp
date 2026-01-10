@@ -89,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function filter() {
     if (!search) return;
     const q = (search.value || '').toLowerCase();
-  const out = cached.filter(e =>
+    const out = cached.filter(e =>
       (e.venue || '').toLowerCase().includes(q) ||
       (e.host || '').toLowerCase().includes(q) ||
       (e.date || '').toLowerCase().includes(q)

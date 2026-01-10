@@ -696,6 +696,11 @@
       });
     }
 
+    // Initialize all form-related handlers and modals
+    setupPhotoZipModal();
+    initForm();
+
+    function setupPhotoZipModal() {
       // modal close behaviour (wired here so DOM refs are available)
       const photoZipModal = getEl('photoZipModal');
       const closeModalBtn = getEl('closePhotoZipModalBtn');
@@ -706,11 +711,10 @@
       function closePhotoModal() {
         if (photoZipModal) photoZipModal.style.display = 'none';
       }
-  
+
       // Attach the close handler only to an enabled control.
       if (closeModalBtn && !closeModalBtn.disabled) closeModalBtn.addEventListener('click', closePhotoModal);
       if (closeModalFooterBtn) closeModalFooterBtn.addEventListener('click', closePhotoModal);
-
-      initForm();
+    }
   });
 })();

@@ -25,112 +25,142 @@
 </header>
 
 <main class="container page">
-  <section class="card">
-    <h1 class="h1">Edit Event</h1>
-    <div id="evtStatus" class="status" style="display:none;"></div>
+  <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+    <h1 class="h1" style="margin:0;">Edit Event</h1>
+    <a class="btn btn-ghost" href="/admin">← Back to List</a>
+  </div>
 
-    <div class="grid-3">
-      <div class="kv">
-        <label>Show Type</label>
-        <select id="showType" class="input">
-          <option value="gsp">GSP</option>
-          <option value="musingo">Musingo</option>
-          <option value="private">Private</option>
-        </select>
-      </div>
-      <div class="kv">
-        <label>Date</label>
-        <input id="eventDate" type="date" class="input" />
-      </div>
-      <div class="kv">
-        <label>Status</label>
-        <select id="status" class="input">
-          <option value="unposted">Unposted</option>
-          <option value="posted">Posted</option>
-        </select>
-      </div>
+  <div class="grid grid-2">
+    <!-- Card 1: Core Details -->
+    <section class="card">
+      <h2 class="h2">Core Details</h2>
+      <div id="evtStatus" class="status" style="display:none;"></div>
 
-      <div class="kv">
-        <label>Host ID</label>
-        <input id="hostId" class="input" placeholder="Host ID (optional)" />
-      </div>
-      <div class="kv">
-        <label>Venue ID</label>
-        <input id="venueId" class="input" placeholder="Venue ID (optional)" /> <!-- Corrected: ID for Venue -->
-      </div>
-      <div class="kv">
-        <label>FB URL</label>
-        <input id="fbUrl" class="input" placeholder="https://www.facebook.com/events/..." />
-      </div>
-    </div>
-
-    <div class="kv" style="margin-top:12px;">
-      <label>Highlights</label>
-      <textarea id="highlights" class="input" rows="3" placeholder="Special shoutout"></textarea>
-    </div>
-
-    <div class="kv" style="margin-top:12px;">
-      <label>AI Recap</label>
-      <textarea id="aiRecap" class="input" rows="4" placeholder="Edit AI text as needed"></textarea>
-    </div>
-
-    <div class="kv" style="margin-top:12px;">
-      <label>PDF URL</label>
-      <input id="pdfUrl" class="input" placeholder="https://storage.googleapis.com/.../recap.pdf" />
-    </div>
-
-    <div class="row row-2" style="margin-top:12px;">
+      <div class="grid grid-2">
         <div class="kv">
-            <label>Validation Status</label>
-            <span id="validationStatus" class="badge">N/A</span>
+          <label>Show Type</label>
+          <select id="showType" class="input">
+            <option value="gsp">GSP</option>
+            <option value="musingo">Musingo</option>
+            <option value="private">Private</option>
+          </select>
         </div>
         <div class="kv">
-            <label>Created At</label>
-            <span id="createdAt" class="badge">N/A</span>
+          <label>Date</label>
+          <input id="eventDate" type="date" class="input" />
         </div>
         <div class="kv">
-            <label>Updated At</label>
-            <span id="updatedAt" class="badge">N/A</span>
+          <label>Status</label>
+          <select id="status" class="input">
+            <option value="unposted">Unposted</option>
+            <option value="posted">Posted</option>
+          </select>
         </div>
+        <div class="kv">
+          <label>FB URL</label>
+          <input id="fbUrl" class="input" placeholder="Facebook Event URL" />
+        </div>
+      </div>
+
+      <div class="row row-2" style="margin-top:12px;">
+        <div class="kv">
+          <label>Host ID</label>
+          <input id="hostId" class="input" placeholder="Host ID" />
+        </div>
+        <div class="kv">
+          <label>Venue ID</label>
+          <input id="venueId" class="input" placeholder="Venue ID" />
+        </div>
+      </div>
+
+      <div class="kv" style="margin-top:12px;">
+        <label>Highlights</label>
+        <textarea id="highlights" class="input" rows="2" placeholder="Special shoutout"></textarea>
+      </div>
+
+      <div class="kv" style="margin-top:12px;">
+        <label>AI Recap</label>
+        <textarea id="aiRecap" class="input" rows="3" placeholder="AI text"></textarea>
+      </div>
+
+      <div class="flex" style="margin-top:20px;">
+        <button id="saveEventBtn" class="btn btn-primary" style="width:100%">Save Core Details</button>
+      </div>
+    </section>
+
+    <!-- Card 2: PDF & Validation -->
+    <section class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-2);">
+        <h2 class="h2" style="margin:0;">PDF & Validation</h2>
+        <div id="validationStatus" class="badge">N/A</div>
+      </div>
+      <div id="pdfStatus" class="status" style="display:none;"></div>
+
+      <div class="kv">
+        <label>PDF URL</label>
+        <input id="pdfUrl" class="input" placeholder="GCS PDF URL" />
+      </div>
+
+      <div class="row row-2" style="margin-top:12px; font-size: 13px;">
+          <div class="kv">
+              <label>Created</label>
+              <div id="createdAt" style="color:var(--text-weak)">—</div>
+          </div>
+          <div class="kv">
+              <label>Updated</label>
+              <div id="updatedAt" style="color:var(--text-weak)">—</div>
+          </div>
+      </div>
+
+      <div style="display:grid; gap:10px; margin-top:24px;">
+        <button id="validateEventBtn" class="btn btn-primary">Validate Event</button>
+        <div class="grid grid-2">
+          <button id="viewPdfOriginalBtn" class="btn btn-ghost">View PDF</button>
+          <button id="parseBtn" class="btn btn-ghost">Parse PDF</button>
+        </div>
+      </div>
+      
+      <div class="help-text" style="margin-top:12px; font-size:12px; color:var(--muted);">
+        Parsing will extract teams and generate a new AI recap based on player data.
+      </div>
+    </section>
+  </div>
+
+  <!-- Participation Rankings -->
+  <section class="card section">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 class="h2" style="margin:0;">Participation (Rankings)</h2>
+      <div class="flex" style="gap:10px;">
+        <button id="addRowBtn" class="btn btn-ghost">Add Row</button>
+        <button id="savePartsBtn" class="btn btn-primary">Save Rankings</button>
+      </div>
     </div>
+    <div id="partsStatus" class="status" style="margin-top:10px; display:none;"></div>
+    <div class="small" style="margin: 10px 0;">Drag and drop team blocks to reorder. Position numbers update on save.</div>
+    <div id="partsContainer" style="margin-top:12px;"></div>
+  </section>
 
-    <div class="flex" style="margin-top:10px; gap:12px; flex-wrap:wrap;">
-      <button id="saveBtn" class="btn btn-primary">Save Event</button>
-      <button id="validateEventBtn" class="btn btn-ghost">Validate Event</button>
-      <button id="viewPdfOriginalBtn" class="btn btn-ghost">View PDF</button>
-      <button id="parseBtn" class="btn btn-ghost">Parse PDF</button>
-
-      <a class="btn btn-ghost" href="/admin.html?v=20260110">← Back</a>
-    </div>
-
-    <hr class="sep" />
-
-    <h2 class="h2">Participation (Rankings)</h2>
-    <div class="small">Edit top rows for the night; add more rows as needed. Position must be unique.</div>
-    <div id="partsContainer"></div>
-    <div class="flex" style="margin-top:10px;">
-      <button id="addRowBtn" class="btn btn-ghost">Add Row</button>
-      <button id="savePartsBtn" class="btn btn-primary">Save Rankings</button>
-    </div>
-
-    <hr class="sep" />
-
-    <hr class="sep" />
+  <!-- Tournament Scoring -->
+  <section class="card section">
     <h2 class="h2">Tournament Score Entry</h2>
-    <div class="small">For each parsed team marked 'Tournament', link them to an official team and enter the points they earned for this event. Points will be assigned to the week of this event's date.</div>
     <div id="tourneyScoreStatus" class="status" style="display:none;"></div>
+    <div class="small" style="margin-bottom: var(--space-3);">Link tournament teams to official database entries and assign points.</div>
     <div id="tourneyScoresContainer">
       <!-- JS will populate this section -->
     </div>
-    <div class="flex" style="margin-top:10px;">
+    <div class="flex" style="margin-top:16px;">
       <button id="saveTourneyScoresBtn" class="btn btn-primary">Save Tournament Scores</button>
     </div>
+  </section>
 
+  <!-- Photos -->
+  <section class="card section">
     <h2 class="h2">Photos</h2>
-    <div id="photosList" class="media-grid"></div>
-    <div class="kv-inline" style="margin-top:10px;">
-      <input id="photoUrlInput" class="input" style="min-width:380px" placeholder="https://storage.googleapis.com/gsp-events-upload/uploads/....jpg" />
-      <button id="addPhotoUrlBtn" class="btn btn-primary">Add Photo by URL</button>
+    <div id="photosStatus" class="status" style="display:none;"></div>
+    <div id="photosList" class="media-grid" style="margin-top:12px;"></div>
+    <div class="kv-inline" style="margin-top:24px; background: var(--panel-2); padding: 12px; border-radius: var(--radius);">
+      <input id="photoUrlInput" class="input" style="flex:1" placeholder="Paste manual photo URL here..." />
+      <button id="addPhotoUrlBtn" class="btn btn-primary">Add URL</button>
     </div>
   </section>
 </main>
