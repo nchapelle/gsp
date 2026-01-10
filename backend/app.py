@@ -20,6 +20,7 @@ except Exception:
 import difflib
 import zipfile
 from datetime import date, timedelta
+from typing import List, Dict, Any, Optional
 
 import requests
 # Backwards-compatible aliases used elsewhere in the codebase / tests
@@ -592,20 +593,43 @@ def likely_noise_line(line: str) -> bool:
     s = line.strip()
     if not s:
         return True
+    
+    # NEW: If the line contains a team signature like "(3)" or "(5 TV)", 
+    # never treat it as noise.
+    if re.search(r"\(\s*[\d\sA-Za-z]+\s*\)", s):
+        return False
+
+    # Standalone rank numbers should NOT be considered noise.
+    if re.fullmatch(r"\d{1,2}", s):
+        return False
+
     upper = s.upper()
+    
+    # Header keywords often appear as standalone lines or labels.
+    # We should only skip if they match the whole word/line to avoid
+    # filtering out teams like "Multiple Scoregasms".
     for kw in HEADER_KEYWORDS:
-        if kw in upper:
+        # Check if the keyword is the entire line or a distinct part of it.
+        # But for some like "QUIZZES", it might be part of "Game Show Palooza Quizzes".
+        if kw == upper:
             return True
+        if kw in ["RANK", "SCORE", "KEYPAD", "TIME (S)", "POINTS", "PLAYERS"]:
+            # Stricter check for these common column headers
+            if re.fullmatch(r"\b" + re.escape(kw) + r"\b", upper):
+                return True
+        elif kw in upper:
+            # For others, partial match is okay (e.g. "PRINT DATE")
+            return True
+
     # If the line only contains non-alphanumeric chars or single digit/letter
     if re.fullmatch(r"[\W_]+", s) or re.fullmatch(r"^\d$", s) or re.fullmatch(r"^[A-Z]$", s):
         return True
     # Filter standalone 2-digit numbers (common parsing artifact)
     if re.fullmatch(r"^\d{2}$", s):
         return True
-    # New: Aggressively filter lines that contain mostly numbers but are too short for scores,
-    # or look like column headers
-    if len(s.split()) >= 3 and all(word.isdigit() or re.match(r"[A-Z]\d?", word) for word in s.split()) and "KEYPAD" in upper:
-        return True # Looks like a column header line
+    # Aggressively filter lines that look like column headers
+    if "KEYPAD" in upper and "TIME" in upper:
+        return True
     return False
 
 def extract_players_and_flags(flag_text: str):
@@ -875,244 +899,161 @@ def _parse_split_format(lines: list[str]):
         logger.warning(f"Error during split format score alignment: {e}")
         pass
 
-    return {"teams": items, "teamCount": len(items), "playerCount": total_players}
-
 def parse_raw_text(raw: str):
     """
-    Extract teams with name, playerCount, isTournament, isVisiting, score, position (rank).
-    We will assign position from explicit ranks when available, else by line order.
-    Also aligns a trailing numeric Score column to team positions when present.
+    Unified parser for PDF text. 
+    1. Extracts teams from lines (Rank Name (Flags) [optional junk] Score).
+    2. Fallback for column-scrambled text.
+    3. Final sort by Rank.
     """
-    items = []
-    total_players = 0
     if not raw:
         return {"teams": [], "teamCount": 0, "playerCount": 0}
 
     text = raw.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
 
-    pat_bracket = re.compile(
-        r"""^\s*\[\s*(?P<name>.+?)\s*\(\s*(?P<flags>[\d\sTVtv]+)\s*\)\s*\]
-            (?:\s+[-–—]?\s*(?P<score>-?\d+))?\s*$""",
-        re.VERBOSE,
-    )
-    pat_ranked = re.compile(
-        r"""^\s*(?:(?P<rank>\d+)[\.\)]\s+)?  
-            (?P<name>[^\(\[]+?)
-            \s*\(\s*(?P<flags>[\d\sTVtv]+)\s*\)
-            (?:\s+[-–—]?\s*(?P<score>-?\d+))?\s*$""",
-        re.VERBOSE,
-    )
-    pat_loose = re.compile(
-        r"""^\s*(?P<name>.+?)\s*\(\s*(?P<flags>[\d\sTVtv]+)\s*\)
-            (?:\s+[-–—]?\s*(?P<score>-?\d+))?\s*$""",
-        re.VERBOSE,
+    # This regex is designed to be extremely robust for "Rank Name (Flags) ... Score"
+    # It looks for:
+    # - Optional Rank at the start
+    # - Non-greedy name
+    # - (PlayerCount/Flags)
+    # - Optional trailing numbers (Keypad/Time) 
+    # - Score at the very end
+    pat_team = re.compile(
+        r"""^\s*
+            (?:(?P<rank>\d{1,3})[\.\)]?\s+)?    # 1. OPTIONAL Rank (e.g. '1 ')
+            (?P<name>.+?)                       # 2. Team Name
+            \s*\(\s*(?P<flags>[\d\sTVtv]*)\s*\) # 3. (Flags)
+            (?:                                 # 4. Trailing data (Score or Junk then Score)
+                (?:\s+[-\d\.]+)*                # Any sequence of numbers/dots (keypad, time)
+                \s+
+                (?P<score>-?\d{1,5})            # The final score
+            )?
+            \s*$""",
+        re.VERBOSE | re.IGNORECASE
     )
 
+    items = []
+    total_players = 0
     seq = 0
-    for ln in lines:
-        s = (ln or "").strip()
+    last_rank_on_line = None
+
+    for i, ln in enumerate(lines):
+        s = ln.strip()
         if not s or likely_noise_line(s):
+            # Standalone rank detection (if rank is on a separate line above name)
+            if re.fullmatch(r"^\d{1,2}$", s):
+                last_rank_on_line = int(s)
             continue
 
-        name = None
-        score = None
-        flags_raw = None
-        rank = None
-
-        m = pat_bracket.match(s)
-        if m:
-            name = (m.group("name") or "").strip()
-            flags_raw = m.group("flags")
-            score = m.group("score")
-        else:
-            m2 = pat_ranked.match(s)
-            if m2:
-                name = (m2.group("name") or "").strip(" -–—\t")
-                flags_raw = m2.group("flags")
-                score = m2.group("score")
-                if m2.group("rank"):
-                    try:
-                        rank = int(m2.group("rank"))
-                    except Exception:
-                        rank = None
-            else:
-                m3 = pat_loose.match(s)
-                if m3:
-                    name = (m3.group("name") or "").strip(" -–—\t")
-                    flags_raw = m3.group("flags")
-                    score = m3.group("score")
-
-        if not name or not flags_raw:
+        m = pat_team.match(s)
+        if not m:
             continue
 
-        nplayers, is_t, is_v = extract_players_and_flags(flags_raw)
-        if score is not None:
-            try:
-                score = int(score)
-            except Exception:
-                score = None
+        name = (m.group("name") or "").strip(" -–—\t")
+        flags_raw = m.group("flags")
+        score_str = m.group("score")
+        rank = int(m.group("rank")) if m.group("rank") else None
 
-        seq += 1
-        position = rank if rank is not None else seq
+        # Apply buffered rank if the line didn't have one
+        if rank is None and last_rank_on_line is not None:
+            rank = last_rank_on_line
+            last_rank_on_line = None
 
+        # Validation: Skip obvious headers
+        if name.upper() in ["TEAM", "PLAYER", "TEAM/PLAYER", "RANK"]:
+            continue
+
+        nplayers, is_t, is_v = extract_players_and_flags(flags_raw or "")
+        
         items.append({
             "name": name,
-            "score": score,
+            "score": int(score_str) if score_str else None,
+            "position": rank,
+            "isVisiting": is_v,
             "playerCount": nplayers or 0,
-            "isTournament": bool(is_t),
-            "isVisiting": bool(is_v),
-            "position": position,
+            "isTournament": is_t,
+            "_seq": seq
         })
+        seq += 1
         total_players += (nplayers or 0)
 
-    if len(items) > 60:
-        items = [t for t in items if t.get("playerCount", 0) > 0 and t.get("name")]
-
-    # Filter out likely invalid teams: numeric-only names without player data, empty names
-    filtered = []
-    for t in items:
-        name = t.get("name", "").strip()
-        if not name:
-            continue
-        # Skip numeric-only team names (2+ digits) unless they have player data
-        if re.fullmatch(r"\d{2,}", name) and t.get("playerCount", 0) == 0:
-            continue
-        filtered.append(t)
-    items = filtered
-
-    # Deduplicate by name (keep first occurrence)
+    # Deduplicate (keep first occurrence of name)
     seen_names = set()
     deduped = []
     for t in items:
-        name = t.get("name", "").strip()
-        if name not in seen_names:
-            seen_names.add(name)
+        nm_key = t["name"].lower()
+        if nm_key not in seen_names:
+            seen_names.add(nm_key)
             deduped.append(t)
     items = deduped
+    teams_n = len(items)
 
-    # Renumber all positions sequentially 1-N
-    for idx, t in enumerate(items, start=1):
-        t["position"] = idx
-
-    # Align trailing "Score" numeric column to positions (best-effort, stricter).
-    # Only run this if most teams don't already have scores (i.e., scores are in separate block)
+    # --- ADVANCED ALIGNMENT (For scrambled columns or separate score blocks) ---
     try:
-        teams_n = len(items)
-        teams_with_scores = sum(1 for t in items if t.get("score") is not None)
-        needs_alignment = teams_with_scores < (teams_n * 0.5)  # Less than 50% have scores
-        
-        if teams_n and needs_alignment:
-            # We want to find a block of numbers that matches our team count.
-            # Some PDFs have double newlines between scores, so we handle that.
-            ls_all = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            
-            # Find all sequences of lines that are just numbers
-            all_ints = []
-            for s in ls_all:
-                # Check for 1-4 digit integers
-                if re.fullmatch(r"-?\d{1,4}", s):
-                    all_ints.append(int(s))
-                elif not re.fullmatch(r"SCORE|POINTS|RANK|#", s.upper()):
-                    # If we hit a non-number line that isn't a known header, 
-                    # we could potentially "break" a sequence, but let's just 
-                    # collect all and find the best sub-sequence.
-                    pass
+        # Sort items by rank (or discovery) BEFORE aligning scores
+        # This ensures that if we have a Score Block [1797, 1573...], 
+        # Score[0] aligns with Rank 1, not just the first team found in text.
+        items.sort(key=lambda x: (x.get("position") or 999, x.get("_seq", 0)))
 
-            # If we didn't find enough integers, the segment method might still work 
-            # for different layouts.
-            segments = re.split(r"\n\s*\n", text)
-            
-            def classify_block(seg_text: str):
-                ls = [ln.strip() for ln in seg_text.split("\n") if ln.strip()]
-                if not ls:
-                    return None
-                ints = []
-                int_like = 0
-                long_ints = 0
-                decimals = 0
-                for s in ls:
-                    if re.fullmatch(r"-?\d+\.\d+", s):
-                        decimals += 1
-                        continue
-                    m = re.fullmatch(r"-?\d+", s)
-                    if m:
-                        int_like += 1
-                        val = int(s)
-                        dlen = len(s.lstrip("-"))
-                        if 1 <= dlen <= 4:
-                            ints.append(val)
-                            if 3 <= dlen <= 4:
-                                long_ints += 1
-                total = len(ls)
-                if total == 0:
-                    return None
-                qualifies = (int_like / total) >= 0.6 and (decimals / total) <= 0.2
-                return {
-                    "qualifies": qualifies,
-                    "score_len": len(ints),
-                    "score_sized": long_ints,
-                    "ints": ints,
-                    "total": total,
-                }
-
-            candidates = []
-            for i, seg in enumerate(segments):
-                info = classify_block(seg)
-                if not info or not info["qualifies"]:
+        # Only run alignment if we actually have teams to align
+        if teams_n > 0:
+            # 1. Find the "Score Block" (a vertical list of integers extracted from headers/columns)
+            blocks = []
+            current_block = []
+            for ln in lines:
+                s = ln.strip()
+                if not s or any(x in s.upper() for x in ["PRINT DATE", "QUIZ DATE", "QUIZ FILE", "PAGE "]):
                     continue
-                if info["score_len"] >= max(3, int(info["total"] * 0.5)) or info["score_len"] == teams_n:
-                    candidates.append((i, info))
+                # If a line looks like a processed team line (has flags), break the numeric block
+                if "(" in s and ")" in s:
+                    if current_block:
+                        blocks.append(current_block)
+                        current_block = []
+                    continue
+                
+                # Check for clean integers in the range 1-5000
+                line_ints = [int(w.strip(".,:;()[]")) for w in s.split() if re.fullmatch(r"-?\d{1,4}", w.strip(".,:;()[]"))]
+                if line_ints:
+                    current_block.extend(line_ints)
+                else:
+                    if current_block:
+                        blocks.append(current_block)
+                        current_block = []
+            if current_block: blocks.append(current_block)
 
-            # Special case: if we have many small segments that are just numbers,
-            # they might have been split. Join them if they are sequential.
-            if not candidates and len(all_ints) >= teams_n:
-                # Use all_ints if we found enough
-                # We'll take the FIRST teams_n integers that look like scores
-                # (usually early in the file after names)
-                # But wait, sometimes they are at the end.
-                # Let's try to find a sequence of teams_n integers.
-                # For now, let's just use the first teams_n if we have them.
-                nums = all_ints[:teams_n]
-                # Update items
-                for idx, t in enumerate(items):
-                    if idx < len(nums):
-                        t["score"] = nums[idx]
-            elif candidates:
-                best = None
-                best_key = None
-                for idx, info in candidates:
-                    diff = abs(info["score_len"] - teams_n)
-                    key = (idx, -int(info["score_sized"]), diff)
-                    if best is None or key > best_key:
-                        best = info
-                        best_key = key
+            # Find the best score block (longest block with high-ish numbers)
+            score_block = []
+            for b in blocks:
+                if len(b) < 3: continue
+                avg = sum(b)/len(b)
+                if (any(v > 400 for v in b) and avg > 100) or (len(b) >= teams_n * 0.7 and avg > 150):
+                    if len(b) > len(score_block): score_block = b
 
-                if best and best["ints"]:
-                    # ... existing logic ...
-                    nums = best["ints"]
-                    pos_to_score = {}
-                    limit = min(len(nums), teams_n)
-                    for p in range(1, limit + 1):
-                        pos_to_score[p] = nums[p - 1]
+            # 2. Map scores to sorted items
+            if score_block:
+                # We have items sorted by position. 
+                # Map Score[i] to items[i] ONLY if the team is missing a score.
+                # However, if the alignment is drastically different, we might be cautious.
+                for i, t in enumerate(items):
+                    if t.get("score") is None and i < len(score_block):
+                        # Use the score that matches this items rank index
+                        # Since items is sorted by position (1, 2, 3...), Score[0] is for Rank 1.
+                        t["score"] = score_block[i]
 
-                    for t in items:
-                        p = t.get("position")
-                        if isinstance(p, int) and p in pos_to_score:
-                            t["score"] = pos_to_score[p]
+    except Exception as e:
+        logger.warning(f"Alignment error: {e}")
 
-                    seq_fill = 1
-                    for t in items:
-                        if t.get("score") is None:
-                            while seq_fill in pos_to_score:
-                                seq_fill += 1
-                            if seq_fill <= len(nums):
-                                t["score"] = nums[seq_fill - 1]
-                                seq_fill += 1
-    except Exception:
-        pass
+    # Final Renumbering & Position Clean-up
+    # Ensure positions are exactly 1...N based on the rank/discovery sort
+    final_players = 0
+    for idx, t in enumerate(items, start=1):
+        # We trust the sort we did above
+        t["position"] = idx
+        final_players += (t.get("playerCount") or 0)
+        if "_seq" in t: del t["_seq"]
 
-    return {"teams": items, "teamCount": len(items), "playerCount": total_players}
+    return {"teams": items, "teamCount": len(items), "playerCount": final_players}
 
 # ------------------------------------------------------------------------------
 # Diagnostics
@@ -2166,7 +2107,18 @@ def create_event():
 
         try:
             if pdf_url:
-                requests.post(f"https://api.gspevents.com/events/{event_id}/parse-pdf", timeout=2)
+                # Use current request context to determine host/scheme for the internal call.
+                # Pass authentication headers forward so the sub-request is authorized.
+                target_url = f"{request.scheme}://{request.host}/events/{event_id}/parse-pdf"
+                headers = {}
+                if 'Authorization' in request.headers:
+                    headers['Authorization'] = request.headers['Authorization']
+                elif 'X-GSP-Token' in request.headers:
+                    headers['X-GSP-Token'] = request.headers['X-GSP-Token']
+                elif HOST_TOKEN:
+                    headers['X-GSP-Token'] = HOST_TOKEN
+
+                requests.post(target_url, headers=headers, timeout=2)
         except Exception as te:
             logger.warning("Parse trigger failed for event %s: %s", event_id, te)
 
@@ -2591,7 +2543,7 @@ def update_status(eid):
 
 @app.post("/events/<int:eid>/parse-pdf")
 def parse_pdf_for_event(eid):
-    auth_error = require_auth(required_roles=['admin'])
+    auth_error = require_auth(required_roles=['admin', 'host'])
     if auth_error:
         return auth_error
     
@@ -3019,7 +2971,16 @@ def migrate_all_drive_pdfs():
         for eid, url in rows:
             results["attempted"] += 1
             try:
-                r = requests.post("https://api.gspevents.com/admin/migrate-pdf", json={"event_id": eid}, timeout=60)
+                target_url = f"{request.scheme}://{request.host}/admin/migrate-pdf"
+                headers = {}
+                if 'Authorization' in request.headers:
+                    headers['Authorization'] = request.headers['Authorization']
+                elif 'X-GSP-Token' in request.headers:
+                    headers['X-GSP-Token'] = request.headers['X-GSP-Token']
+                elif HOST_TOKEN:
+                    headers['X-GSP-Token'] = HOST_TOKEN
+
+                r = requests.post(target_url, json={"event_id": eid}, headers=headers, timeout=60)
                 if r.ok and r.json().get("status") == "ok":
                     results["migrated"] += 1
                 else:
@@ -4275,7 +4236,17 @@ def parse_all_events():
         for eid in ids:
             results["attempted"] += 1
             try:
-                r = requests.post(f"https://api.gspevents.com/events/{eid}/parse-pdf", timeout=30)
+                # Use current request context and pass auth forward
+                target_url = f"{request.scheme}://{request.host}/events/{eid}/parse-pdf"
+                headers = {}
+                if 'Authorization' in request.headers:
+                    headers['Authorization'] = request.headers['Authorization']
+                elif 'X-GSP-Token' in request.headers:
+                    headers['X-GSP-Token'] = request.headers['X-GSP-Token']
+                elif HOST_TOKEN:
+                    headers['X-GSP-Token'] = HOST_TOKEN
+
+                r = requests.post(target_url, headers=headers, timeout=30)
                 if r.ok:
                     js = r.json()
                     if js.get("status") == "success":
