@@ -4,23 +4,7 @@
   const API = CONFIG.API_BASE_URL;
   let hostsCache = [];
 
-  // Initialize authentication - require admin role only
-  if (typeof GSPAuth !== 'undefined') {
-    GSPAuth.init({
-      requiredRoles: ['admin'],
-      requireAuth: true,
-      onAuthReady: function(user) {
-        if (user) {
-          console.log('[admin-data] Auth ready, user:', user.email, 'role:', user.role);
-          // Page will auto-initialize via DOMContentLoaded
-        }
-      }
-    });
-  } else {
-    console.error('[admin-data] GSPAuth not loaded');
-  }
-
-  // ---------- Utilities ----------
+  // --- Internal Module Helpers (No DOM access) ---
   function debounce(fn, ms) {
     let t;
     return function (...args) {
@@ -197,14 +181,20 @@
           getEl("defaultTime").value = v.default_time || "";
           // Default host (new)
           try { if (getEl("venueDefaultHost")) getEl("venueDefaultHost").value = v.default_host_id || ""; } catch (e) {}
-          getEl("accessKey").value = v.access_key || "";
+          
+          const ak = getEl("accessKey");
+          if (ak) ak.value = v.access_key || "";
           
           // Set checkbox
           const chk = getEl("venueIsActive");
           if(chk) chk.checked = (v.is_active !== false); // default true
 
           const linkInput = getEl("ownerLink");
-          if (linkInput) linkInput.value = buildOwnerLink(v.name, v.access_key);
+          if (linkInput && v.access_key && v.name) {
+              linkInput.value = buildOwnerLink(v.name, v.access_key);
+          } else if (linkInput) {
+              linkInput.value = "";
+          }
           const st = getEl("venueFormStatus"); if (st) GSP.status(st, "info", `Editing Venue ID: ${v.id}`);
         });
       });
@@ -365,11 +355,16 @@
       if (!name) return st && GSP.status(st, "error", "Venue name is required.");
       try {
         if (id) {
+          // Send update including access_key (if changed)
           await j(`${API}/admin/venues/${id}`, { 
               method: "PUT", 
               body: JSON.stringify({ name, default_day, default_time, access_key, is_active, default_host_id }) 
           });
-          // ... update links ...
+          
+          // Re-generate owner link display immediately
+          const linkInput = getEl("ownerLink");
+          if (linkInput && access_key) linkInput.value = buildOwnerLink(name, access_key);
+          
           st && GSP.status(st, "success", "Venue updated.");
         } else {
           // For Create, backend defaults is_active=True, but we can send it explicitly
@@ -377,14 +372,58 @@
               method: "POST", 
               body: JSON.stringify({ name, default_day, default_time, is_active, default_host_id }) 
           });
-          // ... update links ...
+          
+          // Show the new key if returned, or tell user to refresh
           st && GSP.status(st, "success", `Venue created. ID: ${r.id}`);
         }
+        
+        // Auto-reload the search list to reflect changes
         searchVenues(getEl, getEl("venueSearch").value || "");
+        
       } catch (err) {
         st && GSP.status(st, "error", err.message || "Save failed.");
       }
     });
+
+    // Wire the "Regenerate Key" button (if you add one to HTML later, here is the logic)
+    const regenBtn = getEl('regenKeyBtn');
+    if (regenBtn) {
+        regenBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const id = getEl("venueId").value;
+            if (!id) return;
+            if (!confirm('Regenerate access key? The old link will stop working.')) return;
+            try {
+                const res = await j(`${API}/admin/venues/${id}/generate-access-key`, { method: 'PUT' });
+                const ak = getEl("accessKey");
+                if (ak) ak.value = res.access_key;
+                
+                const name = getEl("venueName").value;
+                const linkInput = getEl("ownerLink");
+                if (linkInput && res.access_key && name) {
+                    linkInput.value = buildOwnerLink(name, res.access_key);
+                }
+                st && GSP.status(st, "success", "New key generated.");
+            } catch (err) {
+                st && GSP.status(st, "error", "Regen failed: " + err.message);
+            }
+        });
+    }
+
+    // Wire Copy Link Button
+    const copyLinkBtn = getEl('copyOwnerLinkBtn');
+    if (copyLinkBtn) {
+        copyLinkBtn.addEventListener('click', (e) => {
+             e.preventDefault();
+             const linkInput = getEl("ownerLink");
+             if (linkInput && linkInput.value) {
+                 copyToClipboard(linkInput.value);
+                 const originalText = copyLinkBtn.innerText;
+                 copyLinkBtn.innerText = "Copied!";
+                 setTimeout(() => copyLinkBtn.innerText = originalText, 2000);
+             }
+        });
+    }
   }
 
   async function loadVenuesForTeamDropdown(getEl) {
@@ -563,7 +602,7 @@
         container.innerHTML = scores.map(week => `
             <div class="row row-2 week-score-row" data-week-ending="${week.week_ending}">
                 <div class="form-group">
-                    <label>Week of ${new Date(week.week_ending + 'T00:00:00').toLocaleDateString()}</label>
+                    <label>Week of ${GSP.formatDateET(week.week_ending)}</label>
                     <input type="number" class="input weekly-points" placeholder="Points" value="${week.points}" />
                 </div>
                 <div class="form-group">
@@ -900,7 +939,7 @@
     const container = getEl('scheduleBuilderContainer');
     if (!container) return;
     // Compute this week's Monday (start) and Saturday (end)
-    const today = new Date();
+    const today = GSP.nowInET();
     const dow = today.getDay(); // Sun=0..Sat=6
     // compute Monday of current week: if today is Sunday (0), go back 6 days to Monday
     const daysBackToMonday = (dow === 0) ? 6 : (dow - 1);
@@ -1141,13 +1180,11 @@
       wireHostForm(getEl);
       wireVenueForm(getEl);
       wireTeamForm(getEl);
-      loadVenuesForTeamDropdown(getEl);
 
       // Bulk upload (wire then load venues)
       wireBulkUpload(getEl);
-      loadVenuesForBulkSelect(getEl);
       
-            // --- Wire 12-Week Panel ---
+      // --- Wire 12-Week Panel ---
       const manageScoresBtn = getEl('manageScoresBtn');
       const closeScoresModalBtn = getEl('closeScoresModalBtn');
       const scoresModal = getEl('scoresModal');
@@ -1170,6 +1207,10 @@
 
       // --- Initial Data Loads ---
       async function initialLoad() {
+        // Load venues called by dedicated methods to avoid duplication
+        loadVenuesForTeamDropdown(getEl);
+        loadVenuesForBulkSelect(getEl);
+
         const teamHomeVenueSelect = getEl('teamHomeVenue');
         const scoresVenueSelectModal = getEl('scoresVenueSelect');
         try {
@@ -1183,8 +1224,26 @@
             GSP.status(getEl('globalStatus'), 'error', 'Failed to load venues for dropdowns.');
         }
       }
-      initialLoad();
+
+      // Initialize authentication
+      if (typeof GSPAuth !== 'undefined') {
+        GSPAuth.init({
+          requiredRoles: ['admin'],
+          requireAuth: true,
+          onAuthReady: function(user) {
+            if (user) {
+              console.log('[admin-data] Auth ready, user:', user.email);
+              initialLoad();
+            }
+          }
+        });
+      } else {
+        console.error('[admin-data] GSPAuth not loaded, failing safe');
+        // Do not auto-load if auth fails to init, preventing 401 storms
+      }
+
       // --- Schedule Builder wires ---
+
       const loadScheduleBtn = getEl('loadScheduleBtn');
       const generateScheduleBtn = getEl('generateScheduleBtn');
       const saveHostChangesBtn = getEl('saveHostChangesBtn');

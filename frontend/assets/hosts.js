@@ -9,20 +9,35 @@
       onAuthReady: function(user) {
         if (user) {
           console.log('[hosts] Auth ready, user:', user.email, 'role:', user.role, 'display_name:', user.display_name);
-          // Trigger form initialization after auth is ready
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-              initFormWhenReady();
-            });
-          } else {
-            initFormWhenReady();
-          }
         }
       }
     });
   } else {
     console.error('[hosts] GSPAuth not loaded');
   }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // Initialize DOM references
+    hostSel = getEl("hostName");
+    venueSel = getEl("venueName");
+    eventDate = getEl("eventDate");
+    highlights = getEl("highlights");
+    pdfFileInput = getEl("pdfRecap");
+    photoFilesInput = getEl("photos");
+    pdfRecapNameEl = getEl('pdfRecapName');
+    photosNameEl = getEl('photosName');
+    adjectiveSel = getEl("adjective");
+    showTypeSel = getEl("showType");
+    submitButton = getEl("submitButton");
+    resetButton = getEl("resetButton");
+    uploadStatusDiv = getEl("photoUploadStatus");
+    recentEventsList = getEl("recentEventsList");
+    progressBarContainer = getEl("progressBarContainer");
+    progressBar = getEl("progressBar");
+    fileListUL = getEl("fileList");
+    loadPhotosBtn = getEl('load-recent-photos-btn');
+    recentPhotosSection = getEl('recent-photos-section');
+    photoZipLinkContainer = getEl('photo-zip-link');
 
   // --- Start of Re-included Helper Functions ---
   function log() {
@@ -90,53 +105,24 @@
     var seg = bar.children[index];
     if (!seg) return;
     seg.className = "segment " + (status || "pending");
-    var fill = seg.querySelector(".segment-fill");
-    if (!fill) return;
-    if (status === "success" || status === "error") fill.style.width = "100%";
-    else if (status === "pending") fill.style.width = "30%";
-    else if (status === "uploading") fill.style.width = "60%";
-    if (tip) {
-      seg.classList.add("tooltip");
-      seg.setAttribute("data-tip", tip);
-    } else {
-      seg.classList.remove("tooltip");
-      seg.removeAttribute("data-tip");
-    }
+    if (tip) seg.title = tip;
   }
   function hideSegments() {
     var container = document.getElementById("segmentedBarContainer");
-    var bar = document.getElementById("segmentedBar");
-    if (container) container.style.display = "none";
-    if (bar) bar.innerHTML = "";
+    if (container) {
+      setTimeout(function() { container.style.display = "none"; }, 5000);
+    }
   }
-  // --- End of Re-included Helper Functions ---
 
+  // DOM refs - defined at module scope, initialized in DOMContentLoaded
+  var hostSel, venueSel, eventDate, highlights, pdfFileInput, photoFilesInput;
+  var pdfRecapNameEl, photosNameEl, adjectiveSel, showTypeSel;
+  var submitButton, resetButton, uploadStatusDiv, recentEventsList;
+  var progressBarContainer, progressBar, fileListUL;
+  var loadPhotosBtn, recentPhotosSection, photoZipLinkContainer;
 
-  document.addEventListener("DOMContentLoaded", function () {
-    // DOM refs
-    var hostSel = getEl("hostName");
-    var venueSel = getEl("venueName");
-    var eventDate = getEl("eventDate");
-    var highlights = getEl("highlights");
-    var pdfFileInput = getEl("pdfRecap");
-    var photoFilesInput = getEl("photos");
-    var pdfRecapNameEl = getEl('pdfRecapName');
-    var photosNameEl = getEl('photosName');
-    var adjectiveSel = getEl("adjective");
-    var showTypeSel = getEl("showType"); // Get reference to showType dropdown
-    var submitButton = getEl("submitButton");
-    var resetButton = getEl("resetButton");
-    var uploadStatusDiv = getEl("uploadStatus");
-    var recentEventsList = getEl("recentEventsList");
-    var progressBarContainer = getEl("progressBarContainer");
-    var progressBar = getEl("progressBar");
-    var fileListUL = getEl("fileList");
-    var loadPhotosBtn = getEl('load-recent-photos-btn');
-    var recentPhotosSection = getEl('recent-photos-section');
-    var photoZipLinkContainer = getEl('photo-zip-link');
-
-    var allVenues = [];
-    var allEvents = [];
+  var allVenues = [];
+  var allEvents = [];
 
     function getSelectedText(selectEl) {
       if (!selectEl || !selectEl.selectedOptions || !selectEl.selectedOptions[0]) return "";
@@ -274,32 +260,46 @@
       if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Downloading…'; }
       if (statusEl) { statusEl.textContent = ''; }
       try {
-      const fullUrl = (String(urlPath || '').startsWith('http') ? urlPath : CONFIG.API_BASE_URL + urlPath);
-      const headers = {};
-      if (CONFIG.TOKEN) headers['X-GSP-Token'] = CONFIG.TOKEN;
-      const res = await fetch(fullUrl, { method: 'GET', headers: headers });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => res.statusText || 'Failed');
-        throw new Error(txt || 'Network error');
-      }
-      const blob = await res.blob();
-      const filename = `venue_${venueId}_photos_part${part}.zip`;
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-      if (statusEl) statusEl.textContent = 'Downloaded';
-      return true;
+        const fullUrl = (String(urlPath || '').startsWith('http') ? urlPath : CONFIG.API_BASE_URL + urlPath);
+        const headers = {};
+        
+        // Fix: Use Firebase token if available to prevent "Unauthorized" error
+        if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+          try {
+            const token = await firebase.auth().currentUser.getIdToken();
+            headers['Authorization'] = 'Bearer ' + token;
+          } catch (te) {
+            console.warn('[hosts] Failed to get token for zip download:', te);
+          }
+        }
+        
+        if (!headers['Authorization'] && CONFIG.TOKEN) {
+          headers['X-GSP-Token'] = CONFIG.TOKEN;
+        }
+        
+        const res = await fetch(fullUrl, { method: 'GET', headers: headers });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => res.statusText || 'Failed');
+          throw new Error(txt || 'Network error');
+        }
+        const blob = await res.blob();
+        const filename = `venue_${venueId}_photos_part${part}.zip`;
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+        if (statusEl) statusEl.textContent = 'Downloaded';
+        return true;
       } catch (err) {
-      if (statusEl) statusEl.textContent = 'Error: ' + (err.message || 'download failed');
-      console.error('downloadZipPack error', err);
-      return Promise.reject(err);
+        if (statusEl) statusEl.textContent = 'Error: ' + (err.message || 'download failed');
+        console.error('downloadZipPack error', err);
+        return Promise.reject(err);
       } finally {
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Download'; }
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Download'; }
       }
     }
 
@@ -544,20 +544,54 @@
             throw new Error("Host, venue, and date are required.");
           }
 
-          var pdfUrl = null;
-          var photoUrls = [];
+          // Step 1: Create/Update the event entry first with basic metadata.
+          // This ensures the event exists even if subsequent file uploads fail.
+          var eventBody = {
+            hostId: hostId,
+            venueId: venueId,
+            eventDate: ymd,
+            highlights: notes,
+            showType: showType
+          };
+          if (adjective) eventBody.adjective = adjective;
 
+          status(uploadStatusDiv, null, "Creating event entry...");
+          var createRes = await j(CONFIG.API_BASE_URL + "/create-event", {
+            method: "POST",
+            body: JSON.stringify(eventBody)
+          });
+          var eventId = createRes.eventId;
+          var publicUrl = createRes.publicUrl;
+          status(uploadStatusDiv, null, "Event entry ready. Processing files...");
+
+          // Step 2: Handle PDF Recap if selected
           if (pdfFileInput && pdfFileInput.files && pdfFileInput.files[0]) {
-            var pf = pdfFileInput.files[0];
-            if (pf.size > 30 * 1024 * 1024) throw new Error("PDF too large (>30MB).");
-            var fd = new FormData();
-            fd.append("file", pf, pf.name || "recap.pdf");
-            updateFileStatus(pf.name || "recap.pdf", "pending", "Uploading...");
-            var res = await j(CONFIG.API_BASE_URL + "/generate-upload-url", { method: "POST", body: fd });
-            pdfUrl = res.publicUrl;
-            updateFileStatus(pf.name || "recap.pdf", "success", "PDF Uploaded!");
+            try {
+              var pf = pdfFileInput.files[0];
+              if (pf.size > 30 * 1024 * 1024) {
+                updateFileStatus(pf.name || "recap.pdf", "error", "PDF too large (>30MB)");
+              } else {
+                var fd = new FormData();
+                fd.append("file", pf, pf.name || "recap.pdf");
+                updateFileStatus(pf.name || "recap.pdf", "pending", "Uploading PDF...");
+                
+                var uploadRes = await j(CONFIG.API_BASE_URL + "/generate-upload-url", { method: "POST", body: fd });
+                var pdfUrl = uploadRes.publicUrl;
+                
+                // Link the PDF URL to the event immediately
+                await j(CONFIG.API_BASE_URL + "/create-event", {
+                  method: "POST",
+                  body: JSON.stringify(Object.assign({}, eventBody, { pdfUrl: pdfUrl }))
+                });
+                updateFileStatus(pf.name || "recap.pdf", "success", "PDF Uploaded & Linked!");
+              }
+            } catch (pdfErr) {
+              console.error("[hosts] PDF process failed", pdfErr);
+              updateFileStatus("recap.pdf", "error", "PDF failed: " + pdfErr.message);
+            }
           }
 
+          // Step 3: Handle Photos one by one (Incremental Linking)
           if (photoFilesInput && photoFilesInput.files && photoFilesInput.files.length) {
             if (fileListUL) { fileListUL.innerHTML = ""; fileListUL.style.display = "block"; }
             var files = Array.prototype.slice.call(photoFilesInput.files);
@@ -572,39 +606,33 @@
                   continue;
                 }
                 updateSegment(i, "uploading");
-                var fd2 = new FormData();
                 var normalizedFile = await normalizeIosImage(f0);
+                var fd2 = new FormData();
                 fd2.append("file", normalizedFile, normalizedFile.name || "photo.jpg");
-                var res2 = await j(CONFIG.API_BASE_URL + "/generate-upload-url", { method: "POST", body: fd2 });
-                photoUrls.push(res2.publicUrl);
+                
+                // Upload photo bytes
+                var uploadRes2 = await j(CONFIG.API_BASE_URL + "/generate-upload-url", { method: "POST", body: fd2 });
+                var photoUrl = uploadRes2.publicUrl;
+                
+                // Link photo URL to event immediately
+                await j(CONFIG.API_BASE_URL + "/events/" + eventId + "/add-photo-url", {
+                  method: "POST",
+                  body: JSON.stringify({ photoUrl: photoUrl })
+                });
+
                 updateSegment(i, "success");
                 updateFileStatus(f0.name, "success", "Uploaded!");
               } catch (errUp) {
+                console.error("[hosts] Photo link failed", errUp);
                 updateSegment(i, "error", "Upload failed");
                 updateFileStatus(f0.name, "error", "Upload failed");
+                // We continue to the next photo even if one fails
               }
             }
             hideSegments();
           }
 
-          status(uploadStatusDiv, null, "Files processed. Creating event...");
-
-          var body = {
-            hostId: hostId,
-            venueId: venueId,
-            eventDate: ymd,
-            highlights: notes,
-            pdfUrl: pdfUrl,
-            photoUrls: photoUrls,
-            showType: showType
-          };
-          if (adjective) body.adjective = adjective;
-
-          var js3 = await j(CONFIG.API_BASE_URL + "/create-event", {
-            method: "POST",
-            body: JSON.stringify(body)
-          });
-          status(uploadStatusDiv, "success", "Event saved. Open: " + js3.publicUrl);
+          status(uploadStatusDiv, "success", "Event saved. Open: " + publicUrl);
 
           var evs = await j(CONFIG.API_BASE_URL + "/events?status=unposted");
           allEvents = evs || [];
@@ -677,15 +705,8 @@
 
       function closePhotoModal() {
         if (photoZipModal) photoZipModal.style.display = 'none';
-  });
+      }
   
-  // Wrapper to ensure initForm is defined before calling it
-  function initFormWhenReady() {
-    if (typeof initForm === 'function') {
-      initForm();
-    }
-  } }
-
       // Attach the close handler only to an enabled control.
       if (closeModalBtn && !closeModalBtn.disabled) closeModalBtn.addEventListener('click', closePhotoModal);
       if (closeModalFooterBtn) closeModalFooterBtn.addEventListener('click', closePhotoModal);

@@ -9,7 +9,6 @@
       onAuthReady: function(user) {
         if (user) {
           console.log('[host-event] Auth ready, user:', user.email, 'role:', user.role);
-          initPage();
         }
       }
     });
@@ -113,7 +112,7 @@
   function renderEvent(e, els) {
     var photos = Array.isArray(e.photos) ? e.photos : [];
     var hasPhotos = photos.length > 0;
-    var dateStr = e.event_date ? new Date(e.event_date).toLocaleDateString() : "—";
+    var dateStr = GSP.formatDateET(e.event_date);
     var photosHTML = hasPhotos
       ? '<div class="media-grid">' +
         photos.map(function (u) {
@@ -168,27 +167,28 @@
 
   // Upload the file bytes to the backend-proxied GCS endpoint; returns publicUrl
   async function uploadToBucket(file) {
+    // Debug: check if user is authenticated
+    if (typeof firebase !== 'undefined' && firebase.auth) {
+      const user = firebase.auth().currentUser;
+      console.log('[host-event] uploadToBucket - currentUser:', user ? user.email : 'NULL');
+    }
+    
     var fd = new FormData();
     fd.append("file", file, file.name || "photo.jpg");
-    var res = await fetch(CONFIG.API_BASE_URL + "/generate-upload-url", {
+    var js = await j(CONFIG.API_BASE_URL + "/generate-upload-url", {
       method: "POST",
-      body: fd,
+      body: fd
     });
-    if (!res.ok) throw new Error(await res.text());
-    var js = await res.json();
     if (!js.publicUrl) throw new Error("No publicUrl returned");
     return js.publicUrl;
   }
 
   // Link the already-uploaded image to the event (URL-only, no bytes)
   async function linkByUrl(eventId, url) {
-    var res = await fetch(CONFIG.API_BASE_URL + "/events/" + eventId + "/add-photo-url", {
+    return j(CONFIG.API_BASE_URL + "/events/" + eventId + "/add-photo-url", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ photoUrl: url }),
+      body: JSON.stringify({ photoUrl: url })
     });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
   }
 
   function initPage() {
@@ -320,5 +320,12 @@
         loadEvent(eventId, els).catch(function () {});
       });
     }
+  }
+
+  // Initialize page when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPage);
+  } else {
+    initPage();
   }
 })();

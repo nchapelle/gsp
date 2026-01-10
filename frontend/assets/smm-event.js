@@ -10,7 +10,6 @@
       onAuthReady: function(user) {
         if (user) {
           console.log('[smm-event] Auth ready, user:', user.email, 'role:', user.role);
-          // Page will auto-initialize via DOMContentLoaded
         }
       }
     });
@@ -43,7 +42,7 @@
 
     const photos = Array.isArray(e.photos) ? e.photos : [];
     const hasPhotos = photos.length > 0;
-    const dateStr = e.event_date ? new Date(e.event_date).toLocaleDateString() : "—";
+    const dateStr = GSP.formatDateET(e.event_date);
 
     const photosHTML = hasPhotos
       ? `<div class="media-grid">${photos.map(u => `<img src="${u}" style="margin-top: var(--space-3); display:flex; gap:12px; flex-wrap:wrap;" alt="event photo" loading="lazy">`).join("")}</div>`

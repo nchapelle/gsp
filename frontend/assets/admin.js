@@ -1,23 +1,15 @@
 (function () {
   const API = CONFIG.API_BASE_URL;
 
-  // Initialize authentication - require admin role only
-  if (typeof GSPAuth !== 'undefined') {
-    GSPAuth.init({
-      requiredRoles: ['admin'],
-      requireAuth: true,
-      onAuthReady: function(user) {
-        if (user) {
-          console.log('[admin] Auth ready, user:', user.email, 'role:', user.role);
-          // Page will auto-initialize via DOMContentLoaded
-        }
-      }
-    });
-  } else {
-    console.error('[admin] GSPAuth not loaded');
+  // --- Internal Module Helpers (No DOM access, No GSP/CONFIG calls here) ---
+  function debounce(fn, ms) {
+    let t;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
   }
 
-  // --- Internal Module Helpers (No DOM access, No GSP/CONFIG calls here) ---
   function badgeShowType(st) {
     const s = (st || "gsp").toLowerCase();
     const label = s === "musingo" ? "Musingo" : s === "private" ? "Private" : "GSP";
@@ -26,11 +18,7 @@
   }
   function fmtDate(iso) {
     if (!iso) return "—";
-    try {
-      return new Date(iso).toLocaleDateString();
-    } catch {
-      return iso;
-    }
+    return GSP.formatDateET(iso);
   }
   function calculateWeekEnding(dateStr) {
   const date = new Date(dateStr);
@@ -77,7 +65,7 @@
             <td>${e.has_ai ? 'Yes' : 'No'}</td>
             <td>${e.is_validated ? '<span class="badge success">Yes</span>' : '<span class="badge">No</span>'}</td>
             <td class="table-actions">
-              <a class="btn btn-ghost" href="/admin/event?id=${e.id}">Edit</a>
+              <a class="btn btn-ghost" href="/admin/event?id=${e.id}" target="_blank">Edit</a>
               <a class="btn btn-ghost" href="/host/event?id=${e.id}" target="_blank">View</a>
             </td>
           </tr>
@@ -88,18 +76,48 @@
       }
     }
 
+    const debouncedSearch = debounce(search, 300);
+
     if (searchBtn) searchBtn.addEventListener('click', search);
+    
+    // Live search on text input
+    if (q) {
+      q.addEventListener('input', debouncedSearch);
+      q.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+    }
+
+    // Auto-search on filter change
+    if (showType) showType.addEventListener('change', search);
+    if (statusSel) statusSel.addEventListener('change', search);
+    
     if (clearBtn) clearBtn.addEventListener('click', () => {
       if (q) q.value = '';
       if (showType) showType.value = '';
       if (statusSel) statusSel.value = '';
       if (start) start.value = '';
       if (end) end.value = '';
-      tbody.innerHTML = '<tr><td colspan="8">Cleared. Click Search.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8">Cleared.</td></tr>';
       GSP.clearStatus(adminStatus);
+      search(); // Auto-reload all results on clear
     });
 
-    search(); // Initial search on page load
+    // Initialize authentication inside the module function
+    if (typeof GSPAuth !== 'undefined') {
+      GSPAuth.init({
+        requiredRoles: ['admin'],
+        requireAuth: true,
+        onAuthReady: function(user) {
+          if (user) {
+            console.log('[admin] Auth ready, user:', user.email, 'role:', user.role);
+            search(); // Initial search only when auth is ready
+          }
+        }
+      });
+    } else {
+      console.error('[admin] GSPAuth not loaded');
+      // Fallback attempt if auth system missing
+      search();
+    }
   }
 
   // --- MODULE FOR: Admin Event Editor Page ---
@@ -113,12 +131,29 @@
       return;
     }
 
-  // --- Drag-and-Drop Logic (Scoped to this function) ---
+    // Initialize authentication inside the module function
+    if (typeof GSPAuth !== 'undefined') {
+      GSPAuth.init({
+        requiredRoles: ['admin'],
+        requireAuth: true,
+        onAuthReady: function(user) {
+          if (user) {
+            console.log('[admin-event] Auth ready, user:', user.email, 'role:', user.role);
+            load(); // Initial load only when auth is ready
+          }
+        }
+      });
+    } else {
+      console.error('[admin] GSPAuth not loaded');
+      load();
+    }
+
     function wireDragAndDrop() {
         const container = getEl('partsContainer');
         if (!container) return;
 
         let dragSourceElement = null;
+        let isProcessingDrop = false;
 
         container.addEventListener('dragstart', e => {
             const target = e.target.closest('.team-block');
@@ -135,6 +170,7 @@
                 target.classList.remove('dragging');
             }
             dragSourceElement = null;
+            isProcessingDrop = false;
         });
 
         container.addEventListener('dragover', e => {
@@ -151,17 +187,35 @@
         });
 
         container.addEventListener('drop', e => {
-            e.preventDefault();
+            
+            // Prevent duplicate drop event processing
+            if (isProcessingDrop) {
+                console.log('Ignoring duplicate drop event');
+                return;
+            }
+            isProcessingDrop = true;
+            
             const dropTargetElement = e.target.closest('.team-block');
             container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
 
             if (!dragSourceElement || !dropTargetElement || dragSourceElement === dropTargetElement) {
+                isProcessingDrop = false;
                 return;
             }
 
             const allTeamBlocks = Array.from(container.querySelectorAll('.team-block'));
             const sourceIndex = allTeamBlocks.indexOf(dragSourceElement);
-            const targetIndex = allTeamBlocks.indexOf(dropTargetElement);
+            // Re-query the target block from the drop event in case of multiple IDs
+            const currentDropTarget = e.target.closest('.team-block');
+            const targetIndex = allTeamBlocks.indexOf(currentDropTarget);
+
+            if (sourceIndex === -1 || targetIndex === -1) {
+                console.error('Invalid drag operation: source or target not found');
+                isProcessingDrop = false;
+                return;
+            }
+
+            console.log(`Moving team from position ${sourceIndex + 1} to ${targetIndex + 1}`);
 
             const getData = (block) => ({
                 name: block.querySelector('.part-name').value,
@@ -177,22 +231,24 @@
                 block.querySelector('.part-tour').checked = data.tournament;
             };
 
-            const sourceData = getData(dragSourceElement);
+            // Collect all data BEFORE any modifications to prevent read-after-write bugs
+            const allData = allTeamBlocks.map(block => getData(block));
 
             if (sourceIndex < targetIndex) {
                 // Dragging DOWN: Shift elements UP
                 for (let i = sourceIndex; i < targetIndex; i++) {
-                    const nextData = getData(allTeamBlocks[i + 1]);
-                    setData(allTeamBlocks[i], nextData);
+                    setData(allTeamBlocks[i], allData[i + 1]);
                 }
             } else {
                 // Dragging UP: Shift elements DOWN
                 for (let i = sourceIndex; i > targetIndex; i--) {
-                    const prevData = getData(allTeamBlocks[i - 1]);
-                    setData(allTeamBlocks[i], prevData);
+                    setData(allTeamBlocks[i], allData[i - 1]);
                 }
             }
-            setData(allTeamBlocks[targetIndex], sourceData);
+            setData(allTeamBlocks[targetIndex], allData[sourceIndex]);
+            
+            // Success reset
+            isProcessingDrop = false;
         });
     }
 
@@ -338,8 +394,8 @@
           validateBtn.textContent = 'Validate Event';
         }
 
-        getEl('createdAt').textContent = e.created_at ? new Date(e.created_at).toLocaleString() : 'N/A';
-        getEl('updatedAt').textContent = e.updated_at ? new Date(e.updated_at).toLocaleString() : 'N/A';
+        getEl('createdAt').textContent = GSP.formatDateTimeET(e.created_at);
+        getEl('updatedAt').textContent = GSP.formatDateTimeET(e.updated_at);
 
         const partsContainer = getEl('partsContainer');
         partsContainer.innerHTML = (e.participation?.length) ? e.participation.map(participationRowTpl).join('') : participationRowTpl({});
@@ -397,8 +453,15 @@
         })).filter(r => r.team_name);
 
         // Existing save to participation endpoint
-        await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: JSON.stringify({ teams: rows }) });
-        GSP.status(statusEl, 'success', 'Rankings saved.');
+        const response = await GSP.j(`${API}/admin/events/${eid}/participation`, { method: 'PUT', body: JSON.stringify({ teams: rows }) });
+        
+        if (response.ai_recap) {
+            const aiRecapEl = getEl('aiRecap');
+            if (aiRecapEl) aiRecapEl.value = response.ai_recap;
+            GSP.status(statusEl, 'success', 'Rankings saved and AI recap updated.');
+        } else {
+            GSP.status(statusEl, 'success', 'Rankings saved.');
+        }
 
       } catch (err) {
         GSP.status(statusEl, 'error', 'Save failed: ' + err.message);

@@ -61,9 +61,8 @@
 
   async function newWeek() {
     clearStatus(els.status);
-    const today = new Date();
-    const d = new Date(today);
-    // Set to next Sunday (or last Sunday if you prefer)
+    const d = GSP.nowInET();
+    // Set to next Sunday
     const dow = d.getDay();
     const delta = (7 - dow) % 7; // next Sunday
     d.setDate(d.getDate() + delta);

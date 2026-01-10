@@ -11,7 +11,7 @@
     
     containerEl.innerHTML = summary.map(week => `
       <div class="card" style="margin-bottom: var(--space-4);">
-        <h2 class="h2">Week Ending: ${new Date(week.week_ending).toLocaleDateString()}</h2>
+        <h2 class="h2">Week Ending: ${GSP.formatDateET(week.week_ending)}</h2>
         <p class="p"><strong>Total Points This Week: ${week.weekly_points}</strong></p>
         <table class="admin-table">
           <thead>

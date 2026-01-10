@@ -7,24 +7,26 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" /> <!-- Absolute path -->
-  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css" />   <!-- Absolute path -->
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css?v=20260110" /> <!-- Absolute path -->
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css?v=20260110" />   <!-- Absolute path -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://app.gspevents.com/assets/config.js"></script>    <!-- Absolute path -->
-  <script src="https://app.gspevents.com/assets/auth.js"></script>    <!-- Auth component -->
-  <script src="https://app.gspevents.com/assets/main.js"></script>     <!-- Absolute path -->
-  <script src="https://app.gspevents.com/assets/admin.js"></script>    <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/config.js?v=20260110"></script>    <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/auth.js?v=20260110"></script>    <!-- Auth component -->
+  <script src="https://app.gspevents.com/assets/main.js?v=20260110"></script>     <!-- Absolute path -->
+  <script src="https://app.gspevents.com/assets/admin.js?v=20260110"></script>    <!-- Absolute path -->
 </head>
 <body>
 <header class="header">
   <div class="header-inner">
     <img src="https://app.gspevents.com/assets/gsp_logo.png" class="logo" alt="GSP Events" />
-    <div class="header-right">Admin Portal</div>
+    <div class="header-right">
+      <div id="gspAuthContainer"></div>
+    </div>
   </div>
 </header>
 
-<main class="container page">
+<main class="container page gsp-protected-content" style="display: none;">
   <section class="card">
     <h1 class="h1">Events</h1>
     <div class="admin-controls">

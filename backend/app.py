@@ -317,7 +317,8 @@ def _gate():
         '/health', '/doctor', '/migrate',
         '/events', '/venues', '/hosts',  # Public read endpoints
         '/tournament/',  # Public tournament data
-        '/public-events'  # Public events listing
+        '/public-events',  # Public events listing
+        '/pub/'  # Explicitly allow all public venue/stats portals
     ]
     
     # Check if path starts with any public endpoint
@@ -597,6 +598,9 @@ def likely_noise_line(line: str) -> bool:
             return True
     # If the line only contains non-alphanumeric chars or single digit/letter
     if re.fullmatch(r"[\W_]+", s) or re.fullmatch(r"^\d$", s) or re.fullmatch(r"^[A-Z]$", s):
+        return True
+    # Filter standalone 2-digit numbers (common parsing artifact)
+    if re.fullmatch(r"^\d{2}$", s):
         return True
     # New: Aggressively filter lines that contain mostly numbers but are too short for scores,
     # or look like column headers
@@ -965,25 +969,60 @@ def parse_raw_text(raw: str):
     if len(items) > 60:
         items = [t for t in items if t.get("playerCount", 0) > 0 and t.get("name")]
 
-    seen = set()
-    deduped = []
-    next_pos = 0
+    # Filter out likely invalid teams: numeric-only names without player data, empty names
+    filtered = []
     for t in items:
-        p = t.get("position")
-        if p is None or p in seen:
-            next_pos += 1
-            t["position"] = next_pos
-        else:
-            seen.add(p)
-        deduped.append(t)
+        name = t.get("name", "").strip()
+        if not name:
+            continue
+        # Skip numeric-only team names (2+ digits) unless they have player data
+        if re.fullmatch(r"\d{2,}", name) and t.get("playerCount", 0) == 0:
+            continue
+        filtered.append(t)
+    items = filtered
+
+    # Deduplicate by name (keep first occurrence)
+    seen_names = set()
+    deduped = []
+    for t in items:
+        name = t.get("name", "").strip()
+        if name not in seen_names:
+            seen_names.add(name)
+            deduped.append(t)
     items = deduped
 
+    # Renumber all positions sequentially 1-N
+    for idx, t in enumerate(items, start=1):
+        t["position"] = idx
+
     # Align trailing "Score" numeric column to positions (best-effort, stricter).
+    # Only run this if most teams don't already have scores (i.e., scores are in separate block)
     try:
         teams_n = len(items)
-        if teams_n:
-            segments = re.split(r"\n\s*\n", text)
+        teams_with_scores = sum(1 for t in items if t.get("score") is not None)
+        needs_alignment = teams_with_scores < (teams_n * 0.5)  # Less than 50% have scores
+        
+        if teams_n and needs_alignment:
+            # We want to find a block of numbers that matches our team count.
+            # Some PDFs have double newlines between scores, so we handle that.
+            ls_all = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            
+            # Find all sequences of lines that are just numbers
+            all_ints = []
+            for s in ls_all:
+                # Check for 1-4 digit integers
+                if re.fullmatch(r"-?\d{1,4}", s):
+                    all_ints.append(int(s))
+                elif not re.fullmatch(r"SCORE|POINTS|RANK|#", s.upper()):
+                    # If we hit a non-number line that isn't a known header, 
+                    # we could potentially "break" a sequence, but let's just 
+                    # collect all and find the best sub-sequence.
+                    pass
 
+            # If we didn't find enough integers, the segment method might still work 
+            # for different layouts.
+            segments = re.split(r"\n\s*\n", text)
+            
             def classify_block(seg_text: str):
                 ls = [ln.strip() for ln in seg_text.split("\n") if ln.strip()]
                 if not ls:
@@ -1001,11 +1040,10 @@ def parse_raw_text(raw: str):
                         int_like += 1
                         val = int(s)
                         dlen = len(s.lstrip("-"))
-                        if 3 <= dlen <= 4:
+                        if 1 <= dlen <= 4:
                             ints.append(val)
-                            long_ints += 1
-                        elif dlen == 2:
-                            ints.append(val)
+                            if 3 <= dlen <= 4:
+                                long_ints += 1
                 total = len(ls)
                 if total == 0:
                     return None
@@ -1023,10 +1061,24 @@ def parse_raw_text(raw: str):
                 info = classify_block(seg)
                 if not info or not info["qualifies"]:
                     continue
-                if info["score_len"] >= max(3, int(info["total"] * 0.5)):
+                if info["score_len"] >= max(3, int(info["total"] * 0.5)) or info["score_len"] == teams_n:
                     candidates.append((i, info))
 
-            if candidates:
+            # Special case: if we have many small segments that are just numbers,
+            # they might have been split. Join them if they are sequential.
+            if not candidates and len(all_ints) >= teams_n:
+                # Use all_ints if we found enough
+                # We'll take the FIRST teams_n integers that look like scores
+                # (usually early in the file after names)
+                # But wait, sometimes they are at the end.
+                # Let's try to find a sequence of teams_n integers.
+                # For now, let's just use the first teams_n if we have them.
+                nums = all_ints[:teams_n]
+                # Update items
+                for idx, t in enumerate(items):
+                    if idx < len(nums):
+                        t["score"] = nums[idx]
+            elif candidates:
                 best = None
                 best_key = None
                 for idx, info in candidates:
@@ -1037,6 +1089,7 @@ def parse_raw_text(raw: str):
                         best_key = key
 
                 if best and best["ints"]:
+                    # ... existing logic ...
                     nums = best["ints"]
                     pos_to_score = {}
                     limit = min(len(nums), teams_n)
@@ -1441,6 +1494,11 @@ def cleanup_parse_logs(event_id: int, conn_or_cur=None, max_logs_to_keep: int = 
 # ------------------------------------------------------------------------------
 @app.post("/generate-upload-url")
 def proxied_upload():
+    # Require authentication - hosts and admins can upload
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     try:
         if not os.environ.get("GCS_BUCKET"):
             return jsonify({"error": "GCS_BUCKET env var missing or empty"}), 500
@@ -1703,6 +1761,10 @@ def doctor():
 # ------------------------------------------------------------------------------
 @app.route("/hosts")
 def get_hosts():
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -1718,6 +1780,10 @@ def list_venues():
     Public endpoint for Host Portal.
     Only returns ACTIVE venues.
     """
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -1750,6 +1816,10 @@ def get_venue_recent_photos(vid):
     Finds the most recent event for a given venue that has photos
     and returns the event_id and the list of photo URLs.
     """
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -1795,6 +1865,10 @@ def get_venue_recent_photos_zip(venue_id):
     1. No 'part' param -> Returns JSON metadata (list of available packs).
     2. Has 'part' param -> Stream specific ZIP (12 photos).
     """
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     temp_zip_path = None
     
@@ -1994,6 +2068,10 @@ def resolve_host_venue(cur, host_name, venue_name):
 
 @app.post("/create-event")
 def create_event():
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
 
     host_id = d.get("hostId")
@@ -2109,6 +2187,10 @@ def create_event():
 # ------------------------------------------------------------------------------
 @app.get("/events")
 def list_events():
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
     st = request.args.get("status")
     # NEW: is_validated_filter is only applied if explicitly requested, not automatically with `status`
     # This allows hosts to see all their events, regardless of validation status.
@@ -2252,6 +2334,10 @@ def search_venues():
 
 @app.get("/events/<int:eid>")
 def event_details(eid):
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2310,6 +2396,10 @@ def event_details(eid):
 
 @app.post("/events/<int:eid>/add-photo")
 def add_photo_to_event(eid):
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     try:
         if not GCS_BUCKET:
             return jsonify({"error": "GCS_BUCKET env var missing"}), 500
@@ -2436,6 +2526,10 @@ def add_photo_to_event(eid):
 
 @app.post("/events/<int:eid>/add-photo-url")
 def add_photo_by_url(eid):
+    auth_error = require_auth(required_roles=['host', 'admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     url = (d.get("photoUrl") or "").strip()
     if not url.startswith("http"):
@@ -2473,6 +2567,10 @@ def add_photo_by_url(eid):
 
 @app.put("/events/<int:eid>/status")
 def update_status(eid):
+    auth_error = require_auth(required_roles=['smm', 'admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.get_json(silent=True) or {}
     new_status = d.get("status")
     fb_url = d.get("fb_event_url")
@@ -2493,6 +2591,10 @@ def update_status(eid):
 
 @app.post("/events/<int:eid>/parse-pdf")
 def parse_pdf_for_event(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2572,6 +2674,15 @@ def parse_pdf_for_event(eid):
                 """, (
                     eid, team_name, score, position, num_players, is_visiting, is_tournament,
                 ))
+        
+            # Update event totals
+            cur.execute("""
+                UPDATE events 
+                SET total_teams = (SELECT COUNT(*) FROM event_participation WHERE event_id = %s),
+                    total_players = (SELECT SUM(num_players) FROM event_participation WHERE event_id = %s)
+                WHERE id = %s
+            """, (eid, eid, eid))
+
         except Exception as e:
             conn.rollback() # CRITICAL: Rollback immediately on failure
             logger.exception(f"Failed to insert participation record for event {eid}")
@@ -2609,6 +2720,10 @@ def parse_pdf_for_event(eid):
 
 @app.post("/events/<int:eid>/import-from-last-parse")
 def import_from_last_parse(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2666,6 +2781,15 @@ def import_from_last_parse(eid):
                     "INSERT INTO event_participation (event_id, team_name, score, position, num_players, is_visiting) VALUES (%s,%s,%s,%s,%s,%s)",
                     (eid, t["name"], t.get("score"), t.get("position"), t.get("playerCount"), t.get("isVisiting", False))
                 )
+
+            # Update event totals
+            cur.execute("""
+                UPDATE events 
+                SET total_teams = (SELECT COUNT(*) FROM event_participation WHERE event_id = %s),
+                    total_players = (SELECT SUM(num_players) FROM event_participation WHERE event_id = %s)
+                WHERE id = %s
+            """, (eid, eid, eid))
+
         except Exception as e:
             conn.rollback()
             logger.exception(f"Failed to insert participation record for event {eid} during import")
@@ -2704,6 +2828,10 @@ def get_parse_log_by_id(log_id):
     Return a single parse log by log_id, including full raw_text (decompressed)
     and parsed_json (if present).
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2741,6 +2869,10 @@ def get_parse_logs(eid):
     Includes: id, created_at, status, error, parsed_json presence, and raw preview length.
     NOTE: For safety, this only sends a small preview of raw_text, not the full blob.
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     limit = max(1, min(int(request.args.get("limit", "10")), 100))
     conn = getconn()
     try:
@@ -2780,6 +2912,10 @@ def get_parse_logs(eid):
 
 @app.put("/events/<int:eid>/ai")
 def update_ai_text(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.get_json(silent=True) or {}
     text = (d.get("text") or "").strip()
     if not text:
@@ -2799,6 +2935,10 @@ def update_ai_text(eid):
 # ------------------------------------------------------------------------------
 @app.post("/admin/migrate-pdf")
 def migrate_pdf():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     event_id = d.get("event_id")
     pdf_url_in = (d.get("pdf_url") or "").strip()
@@ -2859,6 +2999,10 @@ def migrate_pdf():
 
 @app.post("/admin/migrate-all-drive-pdfs")
 def migrate_all_drive_pdfs():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     limit = int(request.args.get("limit", "500"))
     conn = getconn()
     results = {"attempted":0, "migrated":0, "failed":0, "errors":[]}
@@ -2891,6 +3035,10 @@ def migrate_all_drive_pdfs():
 
 @app.post("/admin/parse-sweep")
 def parse_sweep():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     return parse_all_events()
 
 # ------------------------------------------------------------------------------
@@ -2901,6 +3049,10 @@ def parse_sweep():
 # --- Hosts ---
 @app.get("/admin/hosts")
 def admin_list_hosts():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2912,6 +3064,10 @@ def admin_list_hosts():
 
 @app.post("/admin/hosts")
 def admin_create_host():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     name = (data.get("name") or "").strip()
     phone = (data.get("phone") or "").strip()
@@ -2943,6 +3099,10 @@ def admin_create_host():
 
 @app.get("/admin/hosts/<int:host_id>")
 def admin_get_host_detail(host_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2956,6 +3116,10 @@ def admin_get_host_detail(host_id):
 
 @app.put("/admin/hosts/<int:host_id>")
 def admin_update_host(host_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     name = (data.get("name") or "").strip()
     phone = (data.get("phone") or "").strip()
@@ -2980,6 +3144,10 @@ def admin_update_host(host_id):
 
 @app.delete("/admin/hosts/<int:host_id>")
 def admin_delete_host(host_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -2998,41 +3166,13 @@ def admin_delete_host(host_id):
     finally:
         conn.close()
 
-@app.post("/admin/venues")
-def admin_add_venue():
-    data = request.json or {}
-    name = (data.get("name") or "").strip()
-    default_day = (data.get("default_day") or "").strip()
-    default_time = (data.get("default_time") or "").strip()
-    default_host_id = data.get("default_host_id") if data.get("default_host_id") is not None else None
-    is_active = data.get("is_active", True)
-    show_type = (data.get("show_type") or "gsp").strip()
-    if not name:
-        return jsonify({"error": "Venue name is required"}), 400
-    conn = getconn()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM venues WHERE lower(name) = lower(%s);", (name,))
-        existing_id = cur.fetchone()
-        if existing_id:
-            return jsonify({"status": "exists", "id": existing_id[0]}), 200
-        cur.execute(
-            "INSERT INTO venues (name, default_day, default_time, default_host_id, show_type, is_active) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;",
-            (name, default_day, default_time, default_host_id, show_type, is_active)
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return jsonify({"status": "created", "id": new_id}), 201
-    except Exception as e:
-        logger.exception("admin/venues failed")
-        conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
 
-# --- Venues ---
 @app.get("/admin/venues")
 def admin_list_venues():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3047,6 +3187,10 @@ def admin_list_venues():
 
 @app.post("/admin/venues")
 def admin_create_venue():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     name = (data.get("name") or "").strip()
     default_day = (data.get("default_day") or "").strip()
@@ -3083,6 +3227,10 @@ def admin_create_venue():
 
 @app.get("/admin/venues/<int:venue_id>")
 def admin_get_venue_detail(venue_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3096,7 +3244,10 @@ def admin_get_venue_detail(venue_id):
 
 @app.put("/admin/venues/<int:vid>")
 def admin_update_venue(vid):
-    if not require_host_token(): return jsonify({"error": "unauthorized"}), 401
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json
     name = data.get("name")
     if not name: return jsonify({"error": "name required"}), 400
@@ -3126,6 +3277,10 @@ def admin_update_venue(vid):
 
 @app.delete("/admin/venues/<int:venue_id>")
 def admin_delete_venue(venue_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3147,6 +3302,10 @@ def admin_delete_venue(venue_id):
 # NEW ADMIN ENDPOINT: Generate a new access key for an existing venue
 @app.put("/admin/venues/<int:venue_id>/generate-access-key")
 def admin_generate_venue_access_key(venue_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         new_key = str(uuid4().hex)
@@ -3167,6 +3326,10 @@ def admin_generate_venue_access_key(venue_id):
 # --- Tournament Teams ---
 @app.get("/admin/tournament-teams")
 def admin_list_tournament_teams():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3187,6 +3350,10 @@ def admin_list_tournament_teams():
 
 @app.post("/admin/tournament-teams")
 def admin_create_tournament_team():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     name = (data.get("name") or "").strip()
     home_venue_id = data.get("home_venue_id")
@@ -3219,6 +3386,10 @@ def admin_create_tournament_team():
 
 @app.get("/admin/tournament-teams/<int:team_id>")
 def admin_get_tournament_team_detail(team_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3241,6 +3412,10 @@ def admin_get_tournament_team_detail(team_id):
 
 @app.put("/admin/tournament-teams/<int:team_id>")
 def admin_update_tournament_team(team_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     name = (data.get("name") or "").strip()
     home_venue_id = data.get("home_venue_id")
@@ -3276,6 +3451,10 @@ def admin_update_tournament_team(team_id):
 
 @app.delete("/admin/tournament-teams/<int:team_id>")
 def admin_delete_tournament_team(team_id):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3340,6 +3519,10 @@ def get_team_weekly_scores(team_id):
     Fetches the last 12 weeks of scores for a team AT a specific venue,
     now correctly joining with the tournament_weeks table.
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     venue_id = request.args.get("venue_id")
     if not venue_id:
         return jsonify({"error": "venue_id is required"}), 400
@@ -3385,6 +3568,10 @@ def save_team_weekly_scores(team_id):
     UPSERTS manual scores for a team at a venue for multiple weeks.
     Body: { venue_id: 1, scores: [{ week_ending: "YYYY-MM-DD", points: 100, num_players: 5 }, ...] }
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     venue_id = data.get("venue_id")
     scores = data.get("scores", [])
@@ -3446,6 +3633,10 @@ def get_public_team_breakdown(team_id):
 
 @app.get("/admin/search/hosts")
 def admin_search_hosts():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     q = (request.args.get("q") or "").strip()
     limit = min(int(request.args.get("limit", "25")), 200)
     conn = getconn()
@@ -3471,7 +3662,10 @@ def admin_search_hosts():
 
 @app.get("/admin/search/venues")
 def admin_search_venues():
-    if not require_host_token(): return jsonify({"error": "unauthorized"}), 401
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     q = request.args.get("q", "").strip()
     limit = int(request.args.get("limit", 20))
     conn = getconn()
@@ -3509,6 +3703,10 @@ def admin_search_venues():
 
 @app.get("/admin/search/teams")
 def admin_search_teams():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     q = (request.args.get("q") or "").strip()
     limit = min(int(request.args.get("limit", "25")), 200)
     conn = getconn()
@@ -3549,6 +3747,10 @@ def admin_search_teams():
 # `is_validated`. Admin UI can display/filter based on that.
 @app.get("/admin/events")
 def admin_list_events():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     q = (request.args.get("q") or "").strip()
     show_type = (request.args.get("show_type") or "").strip()  # 'gsp','musingo','private'
     status_f = (request.args.get("status") or "").strip()
@@ -3606,6 +3808,10 @@ def admin_list_events():
 
 @app.get("/admin/events/<int:eid>")
 def admin_event_detail(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3661,6 +3867,10 @@ def admin_event_detail(eid):
 # Partial update core event fields - ADDED is_validated to allowed fields
 @app.put("/admin/events/<int:eid>")
 def admin_update_event(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     allowed = {
         "show_type", "event_date", "host_id", "venue_id",
@@ -3695,6 +3905,10 @@ def admin_update_event(eid):
 # NEW ADMIN ENDPOINT: Validate Event (explicit route)
 @app.put("/admin/events/<int:eid>/validate")
 def admin_validate_event(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.get_json(silent=True) or {}
     validate_status = bool(d.get("is_validated", True)) # Default to True if not provided
 
@@ -3716,6 +3930,10 @@ def admin_validate_event(eid):
 
 @app.put("/admin/events/<int:eid>/participation")
 def admin_replace_participation(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     teams = d.get("teams") or []
     if not isinstance(teams, list):
@@ -3785,12 +4003,13 @@ def admin_replace_participation(eid):
             """, (eid, eid, eid))
 
         # Now, call format_ai_recap with the correct dictionary and the new winners list
+        ai_text = None
         if winners:
             ai_text = format_ai_recap(event_data, winners, venue_defaults)
             cur.execute("UPDATE events SET ai_recap=%s, updated_at=NOW() WHERE id=%s;", (ai_text, eid))
 
         conn.commit()
-        return jsonify({"status": "ok", "count": len(teams)})
+        return jsonify({"status": "ok", "count": len(teams), "ai_recap": ai_text})
     except Exception as e:
         conn.rollback()
         logger.exception("admin_replace_participation failed")
@@ -3811,6 +4030,10 @@ def save_tournament_scores_for_event(event_id):
     This version STRICTLY checks that the event's date falls within a pre-defined
     tournament week from the 'tournament_weeks' table. It will NOT create new weeks.
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = None
     try:
         # --- Robust JSON Parsing (from previous fix) ---
@@ -3910,6 +4133,10 @@ def save_tournament_scores_for_event(event_id):
 # Add/remove photo by URL (unchanged)
 @app.post("/admin/events/<int:eid>/photos")
 def admin_add_photo_url(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     url = (d.get("photoUrl") or "").strip()
     if not url.startswith("http"):
@@ -3929,6 +4156,10 @@ def admin_add_photo_url(eid):
 
 @app.delete("/admin/events/<int:eid>/photos")
 def admin_delete_photo_url(eid):
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     url = (request.args.get("photoUrl") or "").strip()
     if not url:
         return jsonify({"error":"photoUrl required"}), 400
@@ -3951,6 +4182,10 @@ def admin_batch_validate_by_criteria():
     Flags events as validated if they have a PDF and more than 3 photos.
     This is an admin utility for initial data bootstrapping.
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     conn = getconn()
     try:
         cur = conn.cursor()
@@ -3994,6 +4229,10 @@ def admin_batch_validate_by_criteria():
 # ------------------------------------------------------------------------------
 @app.get("/admin/tournament/scores")
 def get_tournament_scores():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     venue_id = request.args.get("venue_id")
     week_ending = request.args.get("week_ending")
     if not venue_id or not week_ending:
@@ -4020,6 +4259,10 @@ def get_tournament_scores():
 
 @app.post("/admin/parse-all")
 def parse_all_events():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     limit = int(request.args.get("limit", "500"))
     conn = getconn()
     results = {"attempted":0, "success":0, "failed":0, "errors":[]}
@@ -4057,6 +4300,10 @@ def admin_weekly_report():
     Returns a per-venue weekly report for a given week.
     ONLY shows venues where is_active is TRUE.
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     wd = (request.args.get("week_ending") or "").strip()
     try:
         if wd:
@@ -4124,6 +4371,10 @@ def admin_weekly_report():
 
 @app.put("/admin/tournament/scores")
 def put_tournament_scores():
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     d = request.json or {}
     venue_id = d.get("venue_id")
     week_ending = d.get("week_ending")
@@ -4182,6 +4433,10 @@ def validate_tournament_scores(venue_id, week_ending):
     Body: { teams: [ { position, team_name, score, num_players, is_visiting, is_tournament, team_id? (optional) } ] }
     Note: Maps score to points; assumes position not directly used (add if needed).
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     data = request.json or {}
     teams = data.get("teams") or []
     if not isinstance(teams, list) or not teams:
@@ -4294,6 +4549,10 @@ def admin_bulk_upload_tournament_teams():
         "events": [ { hostName, venueName, eventDate, highlights?, pdfUrl?, photoUrls?[] } ]
       }
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     payload = request.json or {}
     teams_data: List[Dict[str, Any]] = payload.get("teams") or []
     events_data: List[Dict[str, Any]] = payload.get("events") or []
@@ -4520,6 +4779,10 @@ def admin_bulk_upload_summary_events():
       "options": { "validated": true, "posted": true }
     }
     """
+    auth_error = require_auth(required_roles=['admin'])
+    if auth_error:
+        return auth_error
+    
     payload = request.json
     if not isinstance(payload, dict) or "venue_id" not in payload or "events" not in payload:
         return jsonify({"error": "Request body must be a JSON object with 'venue_id' and 'events' array"}), 400

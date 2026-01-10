@@ -15,34 +15,36 @@
 
   // ---------- ET date helpers ----------
   function nowInET() {
-    var now = new Date();
-    var fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-    var p = {};
-    fmt.formatToParts(now).forEach(function (x) {
-      p[x.type] = x.value;
-    });
-    return new Date(
-      p.year +
-        "-" +
-        p.month +
-        "-" +
-        p.day +
-        "T" +
-        p.hour +
-        ":" +
-        p.minute +
-        ":" +
-        p.second
-    );
+    return new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
+  }
+
+  /**
+   * Robust date formatter for America/New_York
+   * Prevents UTC "off-by-one" day shifts.
+   */
+  function formatDateET(dateInput, format) {
+    if (!dateInput) return "—";
+    var d = (typeof dateInput === 'string') ? new Date(dateInput.includes('T') ? dateInput : dateInput + 'T00:00:00') : new Date(dateInput);
+    if (isNaN(d.getTime())) return "—";
+    
+    // Default to MM/DD/YYYY in ET
+    var options = { timeZone: "America/New_York" };
+    if (format === 'long') {
+      options.month = 'long'; options.day = 'numeric'; options.year = 'numeric';
+    } else if (format === 'full') {
+      options.weekday = 'long'; options.month = 'long'; options.day = 'numeric'; options.year = 'numeric';
+    } else {
+      options.month = '2-digit'; options.day = '2-digit'; options.year = 'numeric';
+    }
+    
+    return d.toLocaleDateString("en-US", options);
+  }
+
+  function formatDateTimeET(dateInput) {
+    if (!dateInput) return "—";
+    var d = new Date(dateInput);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("en-US", { timeZone: "America/New_York" });
   }
 
   var dayToIndex = {
@@ -90,46 +92,14 @@
     },
     dayToIndex: dayToIndex,
     mostRecentDayET: mostRecentDayET,
+    formatDateET: formatDateET,
+    formatDateTimeET: formatDateTimeET,
     // EXPOSE CONFIG.j AND getEl GLOBALLY THROUGH GSP FOR ALL MODULES
     j: CONFIG.j, // Use CONFIG.j directly
     getEl: getEl // Expose the getEl helper
   };
 
-  // ---------- Simple admin password gate (obfuscation only) ----------
-function adminGate() {
-  try {
-    var path = location.pathname;
-
-    // Any admin-protected route (both pretty and html forms)
-    var needsGate =
-      path === "/admin" || path.endsWith("/admin.html") ||
-      path === "/admin/event" || path.endsWith("/admin-event.html") ||
-      path === "/admin/data" || path.endsWith("/admin-data.html") ||
-      path === "/tournament/admin" || path.endsWith("/tournament-admin.html") ||
-      path === "/tournament/teams" || path.endsWith("/tournament-teams.html");
-
-    if (needsGate) {
-      var ok = sessionStorage.getItem("gsp_admin_ok") === "1";
-      if (!ok) {
-        var pw = prompt("Enter admin password:");
-        if (pw !== "GSPevents2020!") {
-          alert("Access denied");
-          location.href = "https://app.gspevents.com/index.html";
-          return false;
-        }
-        sessionStorage.setItem("gsp_admin_ok", "1");
-      }
-    }
-  } catch (e) {
-    console.error("Admin gate error:", e);
-    alert("Authentication system error. Access denied.");
-    location.href = "https://app.gspevents.com/index.html";
-    return false;
-  }
-  return true;
-}
-
-// ---------- Page Router ----------
+  // ---------- Page Router ----------
 function boot() {
   var path = location.pathname;
 
@@ -137,9 +107,7 @@ function boot() {
   if (path === "/hosts" || path.endsWith("/hosts.html")) {
     // hosts.js self-initializes
   } else if (path === "/host/event" || path.endsWith("/host-event.html")) {
-    if (window.HostEvent && typeof window.HostEvent.init === "function") {
-      window.HostEvent.init({ getEl: GSP.getEl });
-    }
+    // host-event.js self-initializes
 
   // SMM
   } else if (path === "/smm" || path.endsWith("/smm.html")) {
@@ -149,32 +117,27 @@ function boot() {
       window.SMMEvent.init({ getEl: GSP.getEl });
     }
 
-  // Admin pages (gate + explicit init)
+  // Admin pages (Auth handled by module self-initialization)
   } else if (path === "/admin" || path.endsWith("/admin.html")) {
-    if (!adminGate()) return;
     if (window.AdminPages && typeof window.AdminPages.initAdminList === "function") {
       window.AdminPages.initAdminList({ getEl: GSP.getEl });
     }
   } else if (path === "/admin/event" || path.endsWith("/admin-event.html")) {
-    if (!adminGate()) return;
     if (window.AdminPages && typeof window.AdminPages.initAdminEvent === "function") {
       window.AdminPages.initAdminEvent({ getEl: GSP.getEl });
     }
-  } else if (path === "/admin-data" || path.endsWith("/admin-data.html")) {
-    if (!adminGate()) return;
+  } else if (path === "/admin/data" || path.endsWith("/admin-data.html")) {
     if (window.AdminData && typeof window.AdminData.init === "function") {
       window.AdminData.init({ getEl: GSP.getEl });
     }
 
   // Tournament admin/teams
   } else if (path === "/tournament/admin" || path.endsWith("/tournament-admin.html")) {
-    if (!adminGate()) return;
     // Assuming tournament-admin.js will expose an init, if not, it self-initializes
     if (window.TournamentAdmin && typeof window.TournamentAdmin.init === 'function') {
         window.TournamentAdmin.init({ getEl: GSP.getEl });
     }
   } else if (path === "/tournament/teams" || path.endsWith("/tournament-teams.html")) {
-    if (!adminGate()) return;
     // Assuming tournament-teams.js will expose an init
     if (window.TournamentTeams && typeof window.TournamentTeams.init === 'function') {
         window.TournamentTeams.init({ getEl: GSP.getEl });

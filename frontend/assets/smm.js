@@ -9,7 +9,6 @@ if (typeof GSPAuth !== 'undefined') {
     onAuthReady: function(user) {
       if (user) {
         console.log('[smm] Auth ready, user:', user.email, 'role:', user.role);
-        // Page will auto-initialize via DOMContentLoaded
       }
     }
   });
@@ -90,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function filter() {
     if (!search) return;
     const q = (search.value || '').toLowerCase();
-    const out = cached.filter(e =>
+  const out = cached.filter(e =>
       (e.venue || '').toLowerCase().includes(q) ||
       (e.host || '').toLowerCase().includes(q) ||
       (e.date || '').toLowerCase().includes(q)

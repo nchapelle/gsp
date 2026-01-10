@@ -60,10 +60,24 @@
           // User is signed in, fetch their profile from backend
           try {
             console.log('[GSP Auth] Fetching user profile for:', firebaseUser.email);
-            const response = await CONFIG.j(`${CONFIG.API_BASE_URL}/api/user/me`);
-            console.log('[GSP Auth] User profile loaded:', response);
+            
+            // Get token directly from the firebaseUser parameter
+            const token = await firebaseUser.getIdToken();
+            const response = await fetch(`${CONFIG.API_BASE_URL}/api/user/me`, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            
+            if (!response.ok) {
+              throw new Error(await response.text());
+            }
+            
+            const userData = await response.json();
+            console.log('[GSP Auth] User profile loaded:', userData);
+            
             this.currentUser = {
-              ...response,
+              ...userData,
               firebaseUser: firebaseUser
             };
             

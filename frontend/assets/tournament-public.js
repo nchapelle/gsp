@@ -46,7 +46,7 @@
         <div class="card">
           <h3 class="h2">${v.name}</h3>
           <div class="p">Weekly: ${v.default_day || '—'} ${v.default_time ? ' • ' + v.default_time : ''}</div>
-          <a class="btn btn-primary" href="/tournament/scores/${v.slug}">Open Venue</a>
+          <a class="btn btn-primary" href="/tournament-venue.html?venue=${v.slug}">Open Venue</a>
         </div>
       `).join('');
 
@@ -60,7 +60,7 @@
         const opt = venueSelect.options[venueSelect.selectedIndex];
         const slug = opt ? opt.getAttribute('data-slug') : null;
         const date = weekSelect.value;
-        if (slug && date) location.href = `/tournament/scores/${slug}/${date}`;
+        if (slug && date) location.href = `/tournament-venue-week.html?venue=${slug}&date=${date}`;
       });
     } catch (err) {
       setStatus('hubStatus', 'error', 'Failed to load venues/weeks');

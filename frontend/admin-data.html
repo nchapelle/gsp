@@ -8,16 +8,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css" />
-  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/styles.css?v=20260110" />
+  <link rel="stylesheet" href="https://app.gspevents.com/assets/admin.css?v=20260110" />
 
   <!-- Load in sequence -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://app.gspevents.com/assets/config.js"></script>
-  <script src="https://app.gspevents.com/assets/auth.js"></script>
-  <script src="https://app.gspevents.com/assets/main.js"></script>
-  <script src="https://app.gspevents.com/assets/admin-data.js"></script>
+  <script src="https://app.gspevents.com/assets/config.js?v=20260110"></script>
+  <script src="https://app.gspevents.com/assets/auth.js?v=20260110"></script>
+  <script src="https://app.gspevents.com/assets/main.js?v=20260110"></script>
+  <script src="https://app.gspevents.com/assets/admin-data.js?v=20260110"></script>
 </head>
 <body>
   <header class="header">
@@ -200,8 +200,8 @@
           <div class="help">Optional: preselect a host when creating events for this venue.</div>
         </div>
           <div class="form-group">
-            <label for="accessKey">Access Key</label>
-            <input id="accessKey" class="input" placeholder="(auto or regenerate)" />
+            <label>Access Key &nbsp; <button id="regenKeyBtn" type="button" class="btn btn-ghost" style="padding: 2px 8px; font-size: 11px;">Generate New</button></label>
+            <input id="accessKey" class="input" readonly placeholder="Key..." style="margin-bottom: 5px;" />
             <div class="help">Used for Venue Owner Portal links. Generate a new key to revoke old access.</div>
           </div>
         </div>
@@ -219,7 +219,6 @@
         <div style="display:flex; gap:12px; flex-wrap:wrap;">
           <button type="submit" class="btn btn-primary" id="venueSaveBtn">Save Venue</button>
           <button type="button" class="btn btn-ghost" id="clearVenueFormBtn">Clear</button>
-          <button type="button" class="btn btn-ghost" id="generateAccessKeyBtn">Generate New Key</button>
         </div>
         <div id="venueFormStatus" class="status mt-2" style="display:none;"></div>
       </form>
@@ -348,7 +347,7 @@
       </div>
     </section>
 
-    <p class="p mt-5 text-center"><a href="/admin.html" class="btn btn-ghost">← Back to Admin</a></p>
+    <p class="p mt-5 text-center"><a href="/admin.html?v=20260110" class="btn btn-ghost">← Back to Admin</a></p>
   </main>
 </body>
 </html>

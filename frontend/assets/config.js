@@ -45,16 +45,23 @@ window.CONFIG = {
   j: async function j(u,o={}) {
     o.headers = Object.assign({}, o.headers || {});
     
-    // Try Firebase auth first (preferred)
+    // Wait for Firebase auth to be ready
     if (typeof firebase !== 'undefined' && firebase.auth) {
       try {
-        const user = firebase.auth().currentUser;
-        if (user) {
-          const token = await user.getIdToken();
-          o.headers["Authorization"] = `Bearer ${token}`;
+        // Wait up to 5 seconds for auth to be ready
+        let attempts = 0;
+        while (attempts < 100) {
+          const user = firebase.auth().currentUser;
+          if (user) {
+            const token = await user.getIdToken();
+            o.headers["Authorization"] = `Bearer ${token}`;
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+          attempts++;
         }
       } catch (e) {
-        console.warn('[GSP Auth] Failed to get Firebase token:', e);
+        console.warn('[CONFIG.j] Failed to get Firebase token:', e);
       }
     }
     
